@@ -209,3 +209,181 @@ test("real rendered demo screenshots at desktop, tablet and mobile; pages, priva
   }
   expect(errors).toEqual([]);
 });
+test("daily entries: income, currency-synced transfer, recurrence, investment-only position picker, receipt from a row", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/");
+  await page.getByLabel("Phrase secrète", { exact: true }).fill(passphrase);
+  await page.getByLabel("Confirmer la phrase secrète").fill(passphrase);
+  await page.getByRole("button", { name: "Créer mon coffre" }).click();
+  const nav = page.getByRole("navigation", {
+    name: "Navigation principale",
+    exact: true,
+  });
+  async function newAccount(name: string, institution: string, ccy: string) {
+    await nav.getByRole("button", { name: "Mes comptes", exact: true }).click();
+    await page.getByRole("button", { name: "Ajouter", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("Nom du compte").fill(name);
+    await dialog.getByLabel("Établissement").fill(institution);
+    if (ccy !== "CHF")
+      await dialog.getByLabel("Devise", { exact: true }).selectOption(ccy);
+    await dialog
+      .getByRole("button", { name: "Enregistrer", exact: true })
+      .click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+  }
+  await newAccount("Compte principal test", "Banque Fictive", "CHF");
+  await newAccount("Compte voyage test", "Banque Fictive", "EUR");
+  await page.getByRole("button", { name: "Ajouter", exact: true }).click();
+  let dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Nom du compte").fill("Portefeuille test");
+  await dialog.getByLabel("Établissement").fill("Courtier Fictif");
+  await dialog.getByLabel("Type", { exact: true }).selectOption("investment");
+  await dialog
+    .getByRole("button", { name: "Enregistrer", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+
+  // 1) Income, confirmed as received, then a receipt attached directly from its row
+  // (no navigation needed; a settled row is where a receipt is actually in hand).
+  await nav.getByRole("button", { name: "Mon mois", exact: true }).click();
+  await page.getByRole("button", { name: "Ajouter", exact: true }).click();
+  dialog = page.getByRole("dialog");
+  await dialog.locator('select[name="kind"]').selectOption("income");
+  await dialog.getByLabel("Libellé").fill("Salaire synthétique test");
+  await dialog.getByLabel("Montant", { exact: true }).fill("3000");
+  await dialog
+    .getByLabel("Compte", { exact: true })
+    .selectOption({ label: "Compte principal test · CHF" });
+  await dialog
+    .getByLabel("État", { exact: true })
+    .selectOption({ label: "Payé / reçu, confirmé" });
+  await dialog
+    .getByRole("button", { name: "Enregistrer", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  const incomeRow = page.locator(".row", {
+    hasText: "Salaire synthétique test",
+  });
+  await incomeRow
+    .getByRole("button", {
+      name: "Joindre un document à Salaire synthétique test",
+    })
+    .setInputFiles({
+      name: "recu-test-fictif.png",
+      mimeType: "image/png",
+      buffer: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    });
+  await expect(incomeRow).toContainText("Justificatif joint");
+  await nav
+    .getByRole("button", { name: "Documents et réglages", exact: true })
+    .click();
+  await expect(
+    page
+      .locator(".row", { hasText: "recu-test-fictif.png" })
+      .getByText("Salaire synthétique test", { exact: false }),
+  ).toBeVisible();
+
+  // 2) Recurrence: currency prefilled from the chosen account, no duplicate entry.
+  await nav.getByRole("button", { name: "Mon mois", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Ajouter une récurrence", exact: true })
+    .click();
+  dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Libellé", { exact: true }).fill("Assurance test");
+  await dialog.getByLabel("Montant", { exact: true }).fill("45");
+  await dialog
+    .getByLabel("Compte", { exact: true })
+    .selectOption({ label: "Compte principal test · CHF" });
+  await expect(dialog.getByLabel("Devise", { exact: true })).toHaveValue(
+    "CHF",
+  );
+  await dialog.getByLabel("Catégorie", { exact: true }).fill("Assurances");
+  await dialog.getByLabel("Jour du mois", { exact: true }).fill("15");
+  await dialog
+    .getByRole("button", { name: "Enregistrer", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(
+    page.getByText("Assurance test", { exact: false }).first(),
+  ).toBeVisible();
+
+  // 3) Transfer between two accounts of different currencies: source account is required,
+  // currency is deduced from it, and the destination amount is required across currencies.
+  await page.getByRole("button", { name: "Ajouter", exact: true }).click();
+  dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Libellé").fill("Virement voyage test");
+  await dialog.locator('select[name="kind"]').selectOption("transfer");
+  await dialog.getByLabel("Montant", { exact: true }).fill("200");
+  await dialog
+    .getByLabel("Compte", { exact: true })
+    .selectOption({ label: "Compte principal test · CHF" });
+  await expect(dialog.getByLabel("Devise", { exact: true })).toHaveValue(
+    "CHF",
+  );
+  await dialog
+    .getByLabel("Compte destinataire", { exact: true })
+    .selectOption({ label: "Compte voyage test · EUR" });
+  await dialog
+    .getByRole("button", { name: "Enregistrer", exact: true })
+    .click();
+  // Cross-currency transfer without a received amount stays open with the input kept.
+  await expect(page.getByRole("dialog")).toHaveCount(1);
+  await expect(page.getByRole("alert")).toContainText(
+    "montant reçu requis pour un virement entre devises",
+  );
+  await expect(dialog.getByLabel("Libellé")).toHaveValue(
+    "Virement voyage test",
+  );
+  await dialog
+    .getByLabel("Montant reçu (devise du destinataire)", { exact: true })
+    .fill("208");
+  await dialog
+    .getByRole("button", { name: "Enregistrer", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(
+    page.getByText("Virement voyage test", { exact: true }),
+  ).toBeVisible();
+  // A transfer is neither income nor expense.
+  await page.getByRole("button", { name: "Revenus", exact: true }).click();
+  await expect(
+    page.getByText("Virement voyage test", { exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Virements", exact: true }).click();
+  await expect(
+    page.getByText("Virement voyage test", { exact: true }),
+  ).toBeVisible();
+
+  // 4) Investment position: only investment-kind accounts are offered.
+  await nav
+    .getByRole("button", { name: "Investissements", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Ajouter", exact: true }).click();
+  dialog = page.getByRole("dialog");
+  const accountOptions = await dialog
+    .getByLabel("Compte d’investissement", { exact: true })
+    .locator("option")
+    .allTextContents();
+  expect(accountOptions).toEqual(["Non renseigné", "Portefeuille test · CHF"]);
+  await dialog.getByLabel("Nom du titre", { exact: true }).fill("ETF test");
+  await dialog
+    .getByLabel("Compte d’investissement", { exact: true })
+    .selectOption({ label: "Portefeuille test · CHF" });
+  await dialog.getByLabel("Valeur totale de la position").fill("1000");
+  await dialog
+    .getByRole("button", { name: "Enregistrer", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(
+    page.locator(".row-title", { hasText: "ETF test" }),
+  ).toBeVisible();
+
+  expect(errors).toEqual([]);
+});

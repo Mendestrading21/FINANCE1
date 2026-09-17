@@ -647,18 +647,26 @@ export default function App() {
         ) : null}
         {data?.transactions.some((i) => i.id === t.id) && (
           <>
-            <label
-              className="icon-button"
-              aria-label={`Joindre un document à ${t.label}`}
-            >
-              <Icon name="document" size={17} />
-              <input
-                className="sr-only"
-                type="file"
-                accept="application/pdf,image/jpeg,image/png,image/webp"
-                onChange={(e) => attach(e, t.id)}
-              />
-            </label>
+            {
+              // Kept exclusive with the "confirmer" action above so a row never carries
+              // three icon buttons at once (crowds the label on an iPhone width). A
+              // receipt is also most often at hand once the operation is settled; a
+              // planned operation can still be reached from Documents et réglages.
+              t.status !== "planned" && (
+                <label
+                  className="icon-button"
+                  aria-label={`Joindre un document à ${t.label}`}
+                >
+                  <Icon name="document" size={17} />
+                  <input
+                    className="sr-only"
+                    type="file"
+                    accept="application/pdf,image/jpeg,image/png,image/webp"
+                    onChange={(e) => attach(e, t.id)}
+                  />
+                </label>
+              )
+            }
             <button
               className="icon-button"
               aria-label={`Modifier ${t.label}`}
