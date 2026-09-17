@@ -55,6 +55,18 @@ L’import réel a passé un parcours privé distinct : deux imports identiques,
 
 Toutes les captures de Finance utilisent la démonstration explicitement fictive. Il s’agit de rendus Chromium avec dimensions adaptées, sans validation Safari/WebKit ni appareil physique.
 
+## Hébergement (17 septembre 2026)
+
+Aucune cible d'hébergement n'est configurée pour Finance1 : ni workflow GitHub Pages (`.github/workflows/` ne contient que `verify.yml`), ni fichier `vercel.json`/`netlify.toml`/`CNAME`, ni compte tiers relié à ce dépôt. `pnpm run build` produit un `dist/` statique, servable par n'importe quel hébergement HTTPS (CSP déjà injectée au build, service worker limité au shell applicatif, aucune donnée privée). Conformément à la consigne de ne pas activer un service non défini ni remplacer un autre site, aucune tentative de déploiement n'a été faite cette nuit. Ce qui manque exactement selon la cible choisie par Elio :
+
+- **GitHub Pages** (le plus simple, pas de nouveau compte) : ce dépôt est **privé** — GitHub Pages sur un dépôt privé nécessite un forfait GitHub payant (Pro/Team/Enterprise) pour ce compte, ou de rendre le dépôt public. Ni l'un ni l'autre n'est une décision technique : à trancher par Elio. Si choisi : ajouter un workflow `actions/deploy-pages` après le build, activer Pages dans Paramètres → Pages avec la source « GitHub Actions ».
+- **Hébergeur statique tiers** (Netlify, Vercel, Cloudflare Pages…) : nécessite un compte créé par Elio et un token de déploiement à ajouter en secret GitHub — aucun de ces comptes n'existe dans ce dépôt aujourd'hui ; en créer un est un service tiers hors du périmètre déjà autorisé sans confirmation explicite.
+- Dans tous les cas : domaine personnalisé optionnel, à la charge d'Elio s'il le souhaite.
+
+## Synchronisation entre appareils — ce qui est réellement possible
+
+Le coffre est local au navigateur (Web Crypto + `localStorage`) ; il n'existe aucun serveur associé à l'application. Une application statique servie par un hébergement HTTPS (une fois choisi ci-dessus) n'ajoute **aucune** synchronisation automatique : appeler l'API Notion directement depuis le navigateur exposerait un jeton d'intégration au client, ce qui n'est pas sûr et n'est pas fait. Sans backend autorisé et configuré (hors périmètre de cette nuit — aucun service payant ni nouvelle connexion sans autorisation explicite), la seule synchronisation honnête entre iPhone, iPad et Windows reste la **sauvegarde chiffrée exportée puis restaurée manuellement** (déjà développée et durcie cette nuit : datation, refus par défaut d'une sauvegarde plus ancienne avec confirmation explicite pour l'outrepasser). Aucune synchronisation automatique n'est annoncée comme fonctionnelle.
+
 ## Prochain travail concret
 
 1. Choisir et configurer un hébergement statique HTTPS pour l’application ; le coffre reste local tant qu’une synchronisation privée n’est pas développée. Vérifier CSP, cache et absence de fichiers privés dans le build.
