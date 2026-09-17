@@ -7,9 +7,11 @@ import {
   monthLabel,
   monthSummary,
   parseMoney,
+  recurrenceAmountAt,
   today,
   transactionsForMonth,
   wealthSummary,
+  withRecurrenceAmount,
 } from "./finance";
 import {
   emptyData,
@@ -281,6 +283,74 @@ describe("mois et récurrences", () => {
     expect(
       transactionsForMonth(d, "2026-10").filter((t) => t.id === "payment"),
     ).toHaveLength(1);
+  });
+  it("ne réécrit pas rétroactivement une occurrence virtuelle passée après une hausse de prix", () => {
+    // Créée en janvier 2026 à 20.00 CHF/mois. L’occurrence de juin, jamais réglée, doit
+    // rester à 20.00 CHF même après la hausse à 30.00 CHF décidée en septembre.
+    const rule = recurrence({
+      id: "sub",
+      amountMinor: 2000,
+      day: 1,
+      startDate: "2026-01-01",
+    });
+    const d = data({ recurrences: [rule] });
+    expect(
+      transactionsForMonth(d, "2026-06").find((t) => t.recurrenceId === "sub")
+        ?.amountMinor,
+    ).toBe(2000);
+    const raised = withRecurrenceAmount(rule, 3000, "2026-09-17");
+    const raisedData = data({ recurrences: [raised] });
+    // L’occurrence passée non réglée garde l’ancien montant : ce cas échouait avant le
+    // correctif (elle affichait rétroactivement 30.00 CHF).
+    expect(
+      transactionsForMonth(raisedData, "2026-06").find(
+        (t) => t.recurrenceId === "sub",
+      )?.amountMinor,
+    ).toBe(2000);
+    // Les occurrences à partir de la date d’effet utilisent le nouveau montant.
+    expect(
+      transactionsForMonth(raisedData, "2026-10").find(
+        (t) => t.recurrenceId === "sub",
+      )?.amountMinor,
+    ).toBe(3000);
+    // Un paiement déjà confirmé (Transaction persistante) n’est jamais réécrit par la
+    // récurrence, quel que soit son montant d’origine.
+    const settledData = data({
+      recurrences: [raised],
+      transactions: [
+        transaction({
+          id: "sub:2026-06-01",
+          recurrenceId: "sub",
+          occurrenceDate: "2026-06-01",
+          status: "settled",
+          date: "2026-06-01",
+          amountMinor: 2000,
+        }),
+      ],
+    });
+    expect(
+      transactionsForMonth(settledData, "2026-06").find(
+        (t) => t.id === "sub:2026-06-01",
+      )?.amountMinor,
+    ).toBe(2000);
+  });
+  it("résout le montant en vigueur d’une récurrence à une date donnée, y compris sans historique", () => {
+    const rule = recurrence({
+      amountMinor: 2000,
+      startDate: "2026-01-01",
+    });
+    expect(recurrenceAmountAt(rule, "2026-06-30")).toBe(2000);
+    const raised = withRecurrenceAmount(rule, 3000, "2026-09-17");
+    expect(recurrenceAmountAt(raised, "2026-09-16")).toBe(2000);
+    expect(recurrenceAmountAt(raised, "2026-09-17")).toBe(3000);
+    expect(recurrenceAmountAt(raised, "2026-12-01")).toBe(3000);
+    // Un montant inchangé ne crée pas d’entrée d’historique inutile.
+    expect(withRecurrenceAmount(raised, 3000, "2026-11-01")).toBe(raised);
+    // Une seconde hausse conserve les deux paliers précédents.
+    const raisedAgain = withRecurrenceAmount(raised, 4000, "2026-12-01");
+    expect(recurrenceAmountAt(raisedAgain, "2026-03-01")).toBe(2000);
+    expect(recurrenceAmountAt(raisedAgain, "2026-09-20")).toBe(3000);
+    expect(recurrenceAmountAt(raisedAgain, "2026-12-01")).toBe(4000);
   });
   it("distingue prévu/reçu et prévu/payé, les transferts sont neutres", () => {
     const d = data({

@@ -8,6 +8,7 @@ import type {
   Goal,
   Position,
   Recurrence,
+  RecurrenceAmount,
   ReviewItem,
   Source,
   Transaction,
@@ -285,12 +286,21 @@ function transaction(value: unknown, path: string): Transaction {
     );
   return result;
 }
+function recurrenceAmount(value: unknown, path: string): RecurrenceAmount {
+  const raw = object(value, path, ["amountMinor", "effectiveFrom"]);
+  return {
+    amountMinor: number(raw.amountMinor, `${path}.amountMinor`, false, true)!,
+    effectiveFrom: date(raw.effectiveFrom, `${path}.effectiveFrom`)!,
+  };
+}
 function recurrence(value: unknown, path: string): Recurrence {
   const raw = object(value, path, [
     "id",
     "label",
     "kind",
     "amountMinor",
+    "amountEffectiveFrom",
+    "amountHistory",
     "currency",
     "accountId",
     "category",
@@ -324,9 +334,42 @@ function recurrence(value: unknown, path: string): Recurrence {
     ...(raw.endDate === undefined
       ? {}
       : { endDate: date(raw.endDate, `${path}.endDate`, true) }),
+    ...(raw.amountEffectiveFrom === undefined
+      ? {}
+      : {
+          amountEffectiveFrom: date(
+            raw.amountEffectiveFrom,
+            `${path}.amountEffectiveFrom`,
+          )!,
+        }),
+    ...(raw.amountHistory === undefined
+      ? {}
+      : {
+          amountHistory: array(
+            raw.amountHistory,
+            `${path}.amountHistory`,
+            recurrenceAmount,
+            1000,
+          ),
+        }),
   };
   if (result.endDate && result.endDate < result.startDate)
     fail(path, "fin antérieure au début");
+  // Amount history stays a strictly ordered chain of superseded amounts, each dated before
+  // the current one took effect — the invariant `withRecurrenceAmount` always maintains.
+  if (result.amountEffectiveFrom && result.amountEffectiveFrom < result.startDate)
+    fail(path, "date d’effet du montant antérieure au début de la récurrence");
+  if (result.amountHistory) {
+    const currentFrom = result.amountEffectiveFrom ?? result.startDate;
+    let previous: string | null = null;
+    for (const entry of result.amountHistory) {
+      if (entry.effectiveFrom >= currentFrom)
+        fail(path, "historique de montant postérieur ou égal au montant courant");
+      if (previous !== null && entry.effectiveFrom <= previous)
+        fail(path, "historique de montant non strictement croissant");
+      previous = entry.effectiveFrom;
+    }
+  }
   return result;
 }
 function goal(value: unknown, path: string): Goal {
@@ -685,8 +728,11 @@ function guardArithmetic(data: FinanceData): void {
   for (const account of data.accounts)
     for (const balance of account.balances)
       add(account.currency, balance.amountMinor);
-  for (const row of [...data.transactions, ...data.recurrences])
+  for (const row of data.transactions) add(row.currency, row.amountMinor);
+  for (const row of data.recurrences) {
     add(row.currency, row.amountMinor);
+    for (const entry of row.amountHistory ?? []) add(row.currency, entry.amountMinor);
+  }
   for (const row of data.positions) add(row.currency, row.valueMinor);
   for (const row of data.goals) {
     add(row.currency, row.targetMinor);

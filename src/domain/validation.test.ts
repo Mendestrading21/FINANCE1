@@ -1,7 +1,27 @@
 import { describe, expect, it } from "vitest";
 import { mergeImport, validateData } from "./validation";
-import { emptyData, type Account, type Transaction } from "./types";
+import {
+  emptyData,
+  type Account,
+  type Recurrence,
+  type Transaction,
+} from "./types";
 const source = { system: "manual" as const };
+const recurrence = (extra: Partial<Recurrence> = {}): Recurrence => ({
+  id: "rent",
+  label: "Loyer",
+  kind: "expense",
+  amountMinor: 200000,
+  currency: "CHF",
+  accountId: "bank",
+  category: "",
+  day: 1,
+  intervalMonths: 1,
+  startDate: "2026-01-01",
+  active: true,
+  source: { ...source },
+  ...extra,
+});
 const account = (id = "bank"): Account => ({
   id,
   name: "Compte",
@@ -193,6 +213,62 @@ describe("frontière de validation des données privées", () => {
     }));
     d.fxRates = [
       { from: "CHF", to: "EUR", rate: "1.5", asOf: "2026-09-17", source },
+    ];
+    expect(() => validateData(d)).toThrow(/précision sûre/);
+  });
+  it("valide un historique de montant de récurrence bien formé et rejette les incohérences", () => {
+    const d = sample();
+    d.recurrences = [
+      recurrence({
+        amountMinor: 3000,
+        amountEffectiveFrom: "2026-09-17",
+        amountHistory: [{ amountMinor: 2000, effectiveFrom: "2026-01-01" }],
+      }),
+    ];
+    expect(validateData(d).recurrences[0].amountHistory).toEqual([
+      { amountMinor: 2000, effectiveFrom: "2026-01-01" },
+    ]);
+    // Une entrée d’historique ne peut pas être postérieure ou égale au montant courant.
+    const overlapping = sample();
+    overlapping.recurrences = [
+      recurrence({
+        amountMinor: 3000,
+        amountEffectiveFrom: "2026-09-17",
+        amountHistory: [{ amountMinor: 2000, effectiveFrom: "2026-09-17" }],
+      }),
+    ];
+    expect(() => validateData(overlapping)).toThrow(/postérieur ou égal/);
+    // Les entrées doivent être strictement croissantes, sans doublon de date.
+    const unordered = sample();
+    unordered.recurrences = [
+      recurrence({
+        amountMinor: 4000,
+        amountEffectiveFrom: "2026-12-01",
+        amountHistory: [
+          { amountMinor: 3000, effectiveFrom: "2026-09-17" },
+          { amountMinor: 2000, effectiveFrom: "2026-01-01" },
+        ],
+      }),
+    ];
+    expect(() => validateData(unordered)).toThrow(/strictement croissant/);
+    // La date d’effet du montant ne peut pas précéder le début de la récurrence.
+    const early = sample();
+    early.recurrences = [
+      recurrence({ startDate: "2026-01-01", amountEffectiveFrom: "2025-12-31" }),
+    ];
+    expect(() => validateData(early)).toThrow(/antérieure au début/);
+  });
+  it("borne la somme incluant l’historique de montant des récurrences", () => {
+    const d = sample();
+    d.accounts[0].balances[0].amountMinor = Number.MAX_SAFE_INTEGER - 1;
+    d.recurrences = [
+      recurrence({
+        amountMinor: 1,
+        amountEffectiveFrom: "2026-09-17",
+        amountHistory: [
+          { amountMinor: Number.MAX_SAFE_INTEGER - 1, effectiveFrom: "2026-01-01" },
+        ],
+      }),
     ];
     expect(() => validateData(d)).toThrow(/précision sûre/);
   });
