@@ -6,9 +6,25 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
-import { type Account, type FinanceData, type Source } from "../domain/types";
-import { parseMoney, today } from "../domain/finance";
+import {
+  type Account,
+  type FinanceData,
+  type Recurrence,
+  type Source,
+} from "../domain/types";
+import { parseMoney, today, withRecurrenceAmount } from "../domain/finance";
 import { Icon } from "./Icon";
+/** Amount-related fields for a saved recurrence: routes an existing recurrence's amount
+ * through `withRecurrenceAmount` (dating any real change and archiving the superseded amount)
+ * instead of overwriting it directly, which would silently drop `amountHistory` on every save.
+ * A brand-new recurrence (no `existing`) has no prior amount to preserve. Exported for direct
+ * unit testing of this exact merge, independent of form/DOM plumbing. */
+export function recurrenceAmountFields(
+  existing: Recurrence | undefined,
+  amountMinor: number,
+): Pick<Recurrence, "amountMinor" | "amountEffectiveFrom" | "amountHistory"> {
+  return existing ? withRecurrenceAmount(existing, amountMinor) : { amountMinor };
+}
 export type EditorSpec = {
   type:
     | "transaction"
@@ -294,11 +310,15 @@ export default function Editor({
           : [...updated.positions, p];
       }
       if (spec.type === "recurrence") {
-        const r = {
+        const existing = data.recurrences.find((r) => r.id === id);
+        const amounts = recurrenceAmountFields(existing, num("amountMinor"));
+        const r: Recurrence = {
           id,
           label: get("label"),
           kind: get("kind") as "income" | "expense",
-          amountMinor: num("amountMinor"),
+          amountMinor: amounts.amountMinor,
+          amountEffectiveFrom: amounts.amountEffectiveFrom,
+          amountHistory: amounts.amountHistory,
           currency: get("currency"),
           accountId: nullable(f.get("accountId")),
           category: get("category"),
@@ -309,7 +329,7 @@ export default function Editor({
           active: get("active") === "true",
           source,
         };
-        updated.recurrences = data.recurrences.some((r) => r.id === id)
+        updated.recurrences = existing
           ? updated.recurrences.map((v) => (v.id === id ? r : v))
           : [...updated.recurrences, r];
       }
