@@ -256,6 +256,35 @@ describe("coffre privé avec le vrai Web Crypto", () => {
     expect(local.length).toBe(0);
   });
 
+  it("conserve une pièce jointe fictive intacte à travers chiffrement, sauvegarde et restauration", async () => {
+    const attachment = {
+      id: "piece-test",
+      name: "Justificatif fictif.txt",
+      mimeType: "text/plain" as const,
+      dataUrl: `data:text/plain;base64,${btoa(
+        "FICTIF - justificatif de test - a supprimer avant tout import reel",
+      )}`,
+      addedAt: "2026-09-17T12:00:00.000Z",
+      source: { system: "manual" as const },
+    };
+    const withAttachment: FinanceData = {
+      ...sample(),
+      documents: [attachment],
+    };
+    await createVault(PASSPHRASE, withAttachment);
+    expect((await unlockVault(PASSPHRASE)).data.documents).toEqual([
+      attachment,
+    ]);
+    const backup = exportVault();
+    local.clear();
+    const restored = await importVault(backup, PASSPHRASE);
+    expect(restored.data.documents).toEqual([attachment]);
+    await saveVault(restored.key, withAttachment);
+    expect((await unlockVault(PASSPHRASE)).data.documents).toEqual([
+      attachment,
+    ]);
+  });
+
   it("ne laisse aucun coffre à moitié écrit si le stockage est plein dès la création, et permet de réessayer", async () => {
     local.failWrites = true;
     await expect(createVault(PASSPHRASE, sample())).rejects.toThrow(

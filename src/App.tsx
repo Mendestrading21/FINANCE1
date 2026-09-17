@@ -419,7 +419,10 @@ export default function App() {
       setBusy(false);
     }
   }
-  async function attach(e: ChangeEvent<HTMLInputElement>) {
+  async function attach(
+    e: ChangeEvent<HTMLInputElement>,
+    transactionId: string | null = receiptTxn || null,
+  ) {
     try {
       const file = e.target.files?.[0];
       if (!file || !data) return;
@@ -447,7 +450,7 @@ export default function App() {
             name: file.name,
             mimeType: file.type,
             dataUrl: encoded,
-            transactionId: receiptTxn || null,
+            transactionId,
             addedAt: new Date().toISOString(),
             source: { system: "manual" },
           },
@@ -624,6 +627,8 @@ export default function App() {
               : t.status === "planned"
                 ? "Prévu"
                 : "À vérifier"}
+            {data?.documents.some((d) => d.transactionId === t.id) &&
+              " · Justificatif joint"}
           </span>
         </div>
         <span className={`row-value ${t.kind === "income" ? "positive" : ""}`}>
@@ -641,15 +646,29 @@ export default function App() {
           </button>
         ) : null}
         {data?.transactions.some((i) => i.id === t.id) && (
-          <button
-            className="icon-button"
-            aria-label={`Modifier ${t.label}`}
-            onClick={() =>
-              edit({ type: "transaction", id: t.id, kind: t.kind })
-            }
-          >
-            <Icon name="edit" size={17} />
-          </button>
+          <>
+            <label
+              className="icon-button"
+              aria-label={`Joindre un document à ${t.label}`}
+            >
+              <Icon name="document" size={17} />
+              <input
+                className="sr-only"
+                type="file"
+                accept="application/pdf,image/jpeg,image/png,image/webp"
+                onChange={(e) => attach(e, t.id)}
+              />
+            </label>
+            <button
+              className="icon-button"
+              aria-label={`Modifier ${t.label}`}
+              onClick={() =>
+                edit({ type: "transaction", id: t.id, kind: t.kind })
+              }
+            >
+              <Icon name="edit" size={17} />
+            </button>
+          </>
         )}
       </div>
     );
