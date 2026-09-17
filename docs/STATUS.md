@@ -23,6 +23,8 @@ La correspondance publique est dans [CORRESPONDANCE_NOTION.md](CORRESPONDANCE_NO
 
 Le rapprochement reste nécessaire avant de pouvoir donner un patrimoine ou un disponible complet : confirmer les soldes datés, les règlements, les comptes de destination des virements, les récurrences et les positions réellement détenues. Une information importée puis modifiée porte une indication de modification manuelle.
 
+**Audit Notion du 17 septembre 2026 (sources accessibles, sans valeurs privées) :** aucune base « Patrimoine » de Budget 2026 ne fournit actuellement de registre de comptes exploitable (établissement/devise/valeur) ; « Mouvements de Capital » (91 lignes, 64 % sans date) ne peut pas devenir des transferts du modèle en l’état (aucun champ compte/devise) et reste à rapprocher manuellement. Les 17 lignes de la base de positions (vue sous plusieurs noms : « Mes Actifs », « Performances 2026 ») n’ont aucune quantité, prix, devise ni date d’achat renseignés : aucune position prouvée à ce jour, conformément à la règle « une watchlist ne devient pas un actif ». Le quota Notion (requêtes de bases) a de nouveau été atteint en cours d’audit, comme lors de la session précédente. Aucun fichier d’import privé n’était joint à cette session ; l’import réel reste bloqué tant qu’Elio ne le fournit pas. Détails complets (identifiants, schémas) dans un rapport privé hors Git.
+
 ## Preuves
 
 | Contrôle exécuté | Résultat |
