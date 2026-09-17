@@ -1,5 +1,13 @@
 node_modules/
 dist/
-.DS_Store
-*.local
 *.tsbuildinfo
+.env
+.env.*
+!.env.example
+private/
+*.finance.json
+*.finance-vault
+*.sqlite*
+*.db
+playwright-report/
+test-results/

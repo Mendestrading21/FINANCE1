@@ -1,0 +1,606 @@
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
+import { type FinanceData, type Source } from "../domain/types";
+import { parseMoney, today } from "../domain/finance";
+import { Icon } from "./Icon";
+export type EditorSpec = {
+  type:
+    | "transaction"
+    | "account"
+    | "balance"
+    | "goal"
+    | "position"
+    | "recurrence"
+    | "fx";
+  id?: string;
+  kind?: "income" | "expense" | "transfer";
+};
+const titles = {
+  transaction: "Une opération",
+  account: "Un compte",
+  balance: "Actualiser le solde",
+  goal: "Un projet",
+  position: "Une position",
+  recurrence: "Une récurrence",
+  fx: "Un taux de change",
+};
+export default function Editor({
+  spec,
+  data,
+  onSave,
+  onClose,
+}: {
+  spec: EditorSpec;
+  data: FinanceData;
+  onSave: (data: FinanceData) => Promise<void>;
+  onClose: () => void;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [kind, setKind] = useState(
+    spec.kind ||
+      data.transactions.find((t) => t.id === spec.id)?.kind ||
+      "expense",
+  );
+  const item =
+    spec.type === "transaction"
+      ? data.transactions.find((i) => i.id === spec.id)
+      : spec.type === "account" || spec.type === "balance"
+        ? data.accounts.find((i) => i.id === spec.id)
+        : spec.type === "goal"
+          ? data.goals.find((i) => i.id === spec.id)
+          : spec.type === "position"
+            ? data.positions.find((i) => i.id === spec.id)
+            : spec.type === "recurrence"
+              ? data.recurrences.find((i) => i.id === spec.id)
+              : undefined;
+  const initial = (item || {}) as unknown as Record<string, unknown>;
+  useEffect(() => {
+    dialog.current?.showModal();
+    return () => dialog.current?.close();
+  }, []);
+  const val = (name: string, fallback = "") =>
+    initial[name] === null || initial[name] === undefined
+      ? fallback
+      : String(initial[name]);
+  const amount = (name: string) =>
+    typeof initial[name] === "number"
+      ? String((initial[name] as number) / 100)
+      : "";
+  const field = (
+    label: string,
+    name: string,
+    options: {
+      type?: string;
+      defaultValue?: string;
+      required?: boolean;
+      children?: ReactNode;
+      min?: string;
+      max?: string;
+      step?: string;
+      hint?: string;
+    } = {},
+  ) => (
+    <label className="field" key={name}>
+      <span>{label}</span>
+      {options.children ? (
+        <select
+          aria-label={label}
+          name={name}
+          defaultValue={options.defaultValue ?? val(name)}
+          required={options.required}
+        >
+          {options.children}
+        </select>
+      ) : (
+        <input
+          aria-label={label}
+          name={name}
+          type={options.type || "text"}
+          defaultValue={options.defaultValue ?? val(name)}
+          required={options.required}
+          min={options.min}
+          max={options.max}
+          step={options.step}
+          maxLength={200}
+          inputMode={
+            name.toLowerCase().includes("amount") ||
+            name.toLowerCase().includes("minor")
+              ? "decimal"
+              : undefined
+          }
+        />
+      )}{" "}
+      {options.hint && <small>{options.hint}</small>}
+    </label>
+  );
+  const accounts = (label = "Compte", name = "accountId", required = false) =>
+    field(label, name, {
+      required,
+      children: (
+        <>
+          <option value="">Non renseigné</option>
+          {data.accounts.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name} · {a.currency}
+            </option>
+          ))}
+        </>
+      ),
+    });
+  const currency = () =>
+    field("Devise", "currency", {
+      defaultValue: val("currency", "CHF"),
+      required: true,
+      children: (
+        <>
+          {["CHF", "EUR", "USD", "GBP"].map((c) => (
+            <option key={c}>{c}</option>
+          ))}
+        </>
+      ),
+    });
+  const nullable = (value: FormDataEntryValue | null) =>
+    value?.toString().trim() || null;
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError("");
+    setBusy(true);
+    try {
+      const f = new FormData(e.currentTarget),
+        get = (n: string) => String(f.get(n) || "").trim(),
+        num = (n: string) => parseMoney(get(n)),
+        optional = (n: string) => (get(n) ? num(n) : null);
+      const updated = structuredClone(data),
+        id = spec.id || crypto.randomUUID();
+      const source: Source = item
+        ? {
+            ...item.source,
+            updatedAt: new Date().toISOString(),
+            note: [
+              item.source.note,
+              "Modification manuelle le " + new Date().toISOString(),
+            ]
+              .filter(Boolean)
+              .join(" · "),
+          }
+        : { system: "manual", updatedAt: new Date().toISOString() };
+      if (spec.type === "account") {
+        const previous = data.accounts.find((a) => a.id === id);
+        const a = {
+          id,
+          name: get("name"),
+          institution: get("institution"),
+          kind: get("kind") as FinanceData["accounts"][number]["kind"],
+          currency: get("currency"),
+          valuationMode: get("valuationMode") as "total" | "components",
+          balances: previous?.balances || [],
+          source,
+        };
+        if (
+          previous &&
+          previous.currency !== a.currency &&
+          previous.balances.length
+        )
+          throw new Error(
+            "Créez un nouveau compte pour une autre devise : les anciens soldes doivent garder leur devise.",
+          );
+        updated.accounts = previous
+          ? updated.accounts.map((v) => (v.id === id ? a : v))
+          : [...updated.accounts, a];
+      }
+      if (spec.type === "balance") {
+        const a = updated.accounts.find((a) => a.id === id);
+        if (!a) throw new Error("Compte introuvable.");
+        a.balances.push({
+          id: crypto.randomUUID(),
+          amountMinor: num("amountMinor"),
+          asOf: get("asOf"),
+          source: { system: "manual", updatedAt: new Date().toISOString() },
+        });
+      }
+      if (spec.type === "transaction") {
+        const t = {
+          id,
+          label: get("label"),
+          kind: get("kind") as "income" | "expense" | "transfer",
+          amountMinor: num("amountMinor"),
+          currency: get("currency"),
+          status: get("status") as "planned" | "settled" | "unknown",
+          date: nullable(f.get("date")),
+          budgetMonth: get("budgetMonth") || undefined,
+          accountId: nullable(f.get("accountId")),
+          destinationAccountId: nullable(f.get("destinationAccountId")),
+          destinationAmountMinor: optional("destinationAmountMinor"),
+          category: get("category"),
+          source,
+          ...(item && "recurrenceId" in item
+            ? {
+                recurrenceId: item.recurrenceId,
+                occurrenceDate: item.occurrenceDate,
+              }
+            : {}),
+        };
+        updated.transactions = data.transactions.some((t) => t.id === id)
+          ? updated.transactions.map((v) => (v.id === id ? t : v))
+          : [...updated.transactions, t];
+      }
+      if (spec.type === "goal") {
+        const g = {
+          id,
+          name: get("name"),
+          targetMinor: optional("targetMinor"),
+          reservedMinor: optional("reservedMinor"),
+          currency: get("currency"),
+          accountId: nullable(f.get("accountId")),
+          dueDate: nullable(f.get("dueDate")),
+          asOf: nullable(f.get("asOf")),
+          source,
+        };
+        updated.goals = data.goals.some((g) => g.id === id)
+          ? updated.goals.map((v) => (v.id === id ? g : v))
+          : [...updated.goals, g];
+      }
+      if (spec.type === "position") {
+        const p = {
+          id,
+          accountId: get("accountId"),
+          name: get("name"),
+          symbol: get("symbol"),
+          assetType: get(
+            "assetType",
+          ) as FinanceData["positions"][number]["assetType"],
+          quantity: nullable(f.get("quantity")),
+          valueMinor: optional("valueMinor"),
+          currency: get("currency"),
+          asOf: nullable(f.get("asOf")),
+          source,
+        };
+        updated.positions = data.positions.some((p) => p.id === id)
+          ? updated.positions.map((v) => (v.id === id ? p : v))
+          : [...updated.positions, p];
+      }
+      if (spec.type === "recurrence") {
+        const r = {
+          id,
+          label: get("label"),
+          kind: get("kind") as "income" | "expense",
+          amountMinor: num("amountMinor"),
+          currency: get("currency"),
+          accountId: nullable(f.get("accountId")),
+          category: get("category"),
+          day: Number(get("day")),
+          intervalMonths: Number(get("intervalMonths")),
+          startDate: get("startDate"),
+          endDate: nullable(f.get("endDate")),
+          active: get("active") === "true",
+          source,
+        };
+        updated.recurrences = data.recurrences.some((r) => r.id === id)
+          ? updated.recurrences.map((v) => (v.id === id ? r : v))
+          : [...updated.recurrences, r];
+      }
+      if (spec.type === "fx")
+        updated.fxRates.push({
+          from: get("from"),
+          to: get("to"),
+          rate: get("rate").replace(",", "."),
+          asOf: get("asOf"),
+          source,
+        });
+      await onSave(updated);
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Enregistrement impossible.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <dialog
+      ref={dialog}
+      onCancel={onClose}
+      className="dialog"
+      aria-labelledby="editor-title"
+    >
+      <div className="dialog-header">
+        <div>
+          <p className="eyebrow">FINANCE · SAISIE RAPIDE</p>
+          <h2 id="editor-title">{titles[spec.type]}</h2>
+        </div>
+        <button
+          className="icon-button"
+          type="button"
+          onClick={onClose}
+          aria-label="Fermer"
+        >
+          <Icon name="close" />
+        </button>
+      </div>
+      <form onSubmit={submit}>
+        <div className="form-grid">
+          {spec.type === "account" && (
+            <>
+              {field("Nom du compte", "name", { required: true })}
+              {field("Établissement", "institution", { required: true })}
+              {field("Type", "kind", {
+                defaultValue: val("kind", "bank"),
+                children: (
+                  <>
+                    <option value="bank">Compte bancaire</option>
+                    <option value="savings">Épargne</option>
+                    <option value="investment">Investissement</option>
+                    <option value="debt">Dette</option>
+                  </>
+                ),
+              })}
+              {currency()}
+              {field("Ce que représente le solde", "valuationMode", {
+                defaultValue: val("valuationMode", "total"),
+                children: (
+                  <>
+                    <option value="total">
+                      Valeur totale, positions incluses
+                    </option>
+                    <option value="components">
+                      Liquidités seules, ajouter les positions
+                    </option>
+                  </>
+                ),
+              })}
+              <p className="footer-note field-full">
+                Vous pourrez ensuite ajouter un solde daté. Le choix de
+                valorisation évite de compter les investissements deux fois.
+              </p>
+            </>
+          )}
+          {spec.type === "balance" && (
+            <>
+              <p className="field-full">
+                {val("name")} · {val("currency")}
+              </p>
+              {field("Solde observé", "amountMinor", {
+                required: true,
+                hint: "Montant du relevé, signe − si découvert.",
+              })}
+              {field("Date du solde", "asOf", {
+                type: "date",
+                required: true,
+                defaultValue: today(),
+                max: today(),
+              })}
+              <p className="footer-note field-full">
+                L’historique est conservé. Cette observation n’ajoute ni revenu
+                ni dépense.
+              </p>
+            </>
+          )}
+          {spec.type === "transaction" && (
+            <>
+              {field("Libellé", "label", { required: true })}
+              <label className="field">
+                <span>Type</span>
+                <select
+                  name="kind"
+                  value={kind}
+                  onChange={(e) => setKind(e.target.value as typeof kind)}
+                >
+                  <option value="expense">Dépense</option>
+                  <option value="income">Revenu</option>
+                  <option value="transfer">Virement entre mes comptes</option>
+                </select>
+              </label>
+              {field("Montant", "amountMinor", {
+                required: true,
+                defaultValue: amount("amountMinor"),
+              })}
+              {currency()}
+              {accounts()}
+              {field("Date de l’opération ou échéance", "date", {
+                type: "date",
+                defaultValue: val("date", item ? "" : today()),
+              })}
+              {field("Mois de budget (facultatif)", "budgetMonth", {
+                type: "month",
+              })}
+              {field("État", "status", {
+                defaultValue: val("status", "planned"),
+                children: (
+                  <>
+                    <option value="planned">Prévu</option>
+                    <option value="settled">Payé / reçu, confirmé</option>
+                    <option value="unknown">À vérifier</option>
+                  </>
+                ),
+              })}
+              {field("Catégorie", "category", {
+                defaultValue: val("category", "Divers"),
+                required: true,
+              })}
+              {kind === "transfer" && (
+                <>
+                  {accounts(
+                    "Compte destinataire",
+                    "destinationAccountId",
+                    true,
+                  )}
+                  {field(
+                    "Montant reçu (devise du destinataire)",
+                    "destinationAmountMinor",
+                    {
+                      defaultValue: amount("destinationAmountMinor"),
+                      hint: "À renseigner pour un virement entre devises différentes.",
+                    },
+                  )}
+                </>
+              )}
+              <p className="footer-note field-full">
+                L’opération alimente votre mois. Les soldes restent des
+                observations : actualisez-les depuis Mes comptes après
+                rapprochement.
+              </p>
+            </>
+          )}
+          {spec.type === "goal" && (
+            <>
+              {field("Nom du projet", "name", { required: true })}
+              {currency()}
+              {field("Objectif", "targetMinor", {
+                defaultValue: amount("targetMinor"),
+              })}
+              {field("Déjà réservé", "reservedMinor", {
+                defaultValue: amount("reservedMinor"),
+              })}
+              {accounts("Réserve incluse dans ce compte")}
+              {field("Date de la réserve", "asOf", {
+                type: "date",
+                defaultValue: val("asOf", item ? "" : today()),
+                max: today(),
+              })}
+              {field("Échéance", "dueDate", { type: "date" })}
+              <p className="footer-note field-full">
+                Une réserve fait partie du compte associé. Elle n’est pas
+                ajoutée au patrimoine une seconde fois.
+              </p>
+            </>
+          )}
+          {spec.type === "position" && (
+            <>
+              {field("Nom du titre", "name", { required: true })}
+              {field("Symbole", "symbol")}
+              {accounts("Compte d’investissement", "accountId", true)}
+              {field("Type d’actif", "assetType", {
+                defaultValue: val("assetType", "stock"),
+                children: (
+                  <>
+                    <option value="stock">Action</option>
+                    <option value="etf">ETF</option>
+                    <option value="option">Option</option>
+                    <option value="crypto">Crypto</option>
+                    <option value="other">Autre</option>
+                  </>
+                ),
+              })}
+              {field("Quantité", "quantity")}
+              {field("Valeur totale de la position", "valueMinor", {
+                defaultValue: amount("valueMinor"),
+              })}
+              {currency()}
+              {field("Date de valorisation", "asOf", {
+                type: "date",
+                max: today(),
+              })}
+              <p className="footer-note field-full">
+                Pour les options, saisir la valeur totale en tenant compte du
+                multiplicateur du contrat. Aucun cours en temps réel n’est
+                supposé.
+              </p>
+            </>
+          )}
+          {spec.type === "recurrence" && (
+            <>
+              {field("Libellé", "label", { required: true })}
+              {field("Type", "kind", {
+                defaultValue: val("kind", "expense"),
+                children: (
+                  <>
+                    <option value="expense">Dépense</option>
+                    <option value="income">Revenu</option>
+                  </>
+                ),
+              })}
+              {field("Montant", "amountMinor", {
+                defaultValue: amount("amountMinor"),
+                required: true,
+              })}
+              {currency()}
+              {accounts()}
+              {field("Catégorie", "category", {
+                defaultValue: val("category", "Abonnements"),
+                required: true,
+              })}
+              {field("Jour du mois", "day", {
+                type: "number",
+                defaultValue: val("day", "1"),
+                required: true,
+                min: "1",
+                max: "31",
+              })}
+              {field("Tous les… mois", "intervalMonths", {
+                defaultValue: val("intervalMonths", "1"),
+                children: (
+                  <>
+                    <option value="1">Mois</option>
+                    <option value="3">3 mois</option>
+                    <option value="6">6 mois</option>
+                    <option value="12">Ans</option>
+                  </>
+                ),
+              })}
+              {field("Début", "startDate", {
+                type: "date",
+                required: true,
+                defaultValue: val("startDate", today()),
+              })}
+              {field("Fin (facultative)", "endDate", { type: "date" })}
+              {field("Récurrence", "active", {
+                defaultValue: val("active", "true"),
+                children: (
+                  <>
+                    <option value="true">Active</option>
+                    <option value="false">En pause</option>
+                  </>
+                ),
+              })}
+              <p className="footer-note field-full">
+                Les échéances sont créées comme prévues. Chaque paiement doit
+                être confirmé.
+              </p>
+            </>
+          )}
+          {spec.type === "fx" && (
+            <>
+              {field("Devise source", "from", {
+                required: true,
+                defaultValue: "EUR",
+              })}
+              {field("Devise cible", "to", {
+                required: true,
+                defaultValue: "CHF",
+              })}
+              {field("1 unité source vaut…", "rate", {
+                required: true,
+                hint: "Taux du relevé, pas un cours estimé.",
+              })}
+              {field("Date du taux", "asOf", {
+                type: "date",
+                required: true,
+                defaultValue: today(),
+                max: today(),
+              })}
+            </>
+          )}
+        </div>
+        {error && (
+          <p role="alert" className="error">
+            {error}
+          </p>
+        )}
+        <div className="form-actions">
+          <button type="button" className="button secondary" onClick={onClose}>
+            Annuler
+          </button>
+          <button className="button primary" disabled={busy}>
+            {busy ? "Enregistrement…" : "Enregistrer"}
+          </button>
+        </div>
+      </form>
+    </dialog>
+  );
+}
