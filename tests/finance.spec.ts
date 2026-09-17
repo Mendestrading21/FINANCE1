@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 const passphrase = "Exemple-test-Finance-2026"; // Synthetic test credential; never used for a real vault.
 test("private vault: account, dated balance, operation, lock, wrong password, reload", async ({
   page,
@@ -384,6 +384,127 @@ test("daily entries: income, currency-synced transfer, recurrence, investment-on
   await expect(
     page.locator(".row-title", { hasText: "ETF test" }),
   ).toBeVisible();
+
+  expect(errors).toEqual([]);
+});
+test("restore an older backup: refused with an explicit confirmation, cancel changes nothing, confirming restores it", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  const restorePassphrase = "Exemple-test-Finance-restore-2026";
+  const nav = page.getByRole("navigation", {
+    name: "Navigation principale",
+    exact: true,
+  });
+  async function addAccount(name: string) {
+    await nav.getByRole("button", { name: "Mes comptes", exact: true }).click();
+    await page.getByRole("button", { name: "Ajouter", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("Nom du compte").fill(name);
+    await dialog.getByLabel("Établissement").fill("Banque Fictive");
+    await dialog
+      .getByRole("button", { name: "Enregistrer", exact: true })
+      .click();
+    await expect(page.getByText(name, { exact: true })).toBeVisible();
+  }
+
+  await page.goto("/");
+  await page.getByLabel("Phrase secrète", { exact: true }).fill(restorePassphrase);
+  await page.getByLabel("Confirmer la phrase secrète").fill(restorePassphrase);
+  await page.getByRole("button", { name: "Créer mon coffre" }).click();
+
+  // Baseline account, then an encrypted backup that dates this exact state ("old").
+  await addAccount("Compte ancien fictif");
+  await nav
+    .getByRole("button", { name: "Documents et réglages", exact: true })
+    .click();
+  const downloadPromise = page.waitForEvent("download");
+  await page
+    .getByRole("button", { name: "Sauvegarde chiffrée", exact: true })
+    .click();
+  const download = await downloadPromise;
+  const downloadPath = await download.path();
+  if (!downloadPath) throw new Error("Téléchargement de sauvegarde introuvable.");
+  const oldBackup = await readFile(downloadPath);
+
+  // A later change moves the on-device vault's savedAt strictly after the backup above.
+  await addAccount("Compte récent fictif");
+  await page
+    .getByRole("button", { name: "Verrouiller l’espace", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Ouvrir mon espace" }),
+  ).toBeVisible();
+
+  async function selectOldBackupAndSubmit() {
+    await page.getByLabel("Restaurer une sauvegarde").setInputFiles({
+      name: "ancienne-sauvegarde.finance-vault",
+      mimeType: "application/octet-stream",
+      buffer: oldBackup,
+    });
+    await expect(
+      page.getByRole("heading", { name: "Restaurer votre sauvegarde" }),
+    ).toBeVisible();
+    await page
+      .getByLabel("Phrase secrète", { exact: true })
+      .fill(restorePassphrase);
+    await page
+      .getByLabel("Remplacer le coffre de cet appareil par cette sauvegarde.")
+      .check();
+    await page.getByRole("button", { name: "Restaurer", exact: true }).click();
+  }
+
+  // 1) Refused: the backup is older than the vault already on this device.
+  await selectOldBackupAndSubmit();
+  const confirmHeading = page.getByRole("heading", {
+    name: "Confirmer la restauration",
+  });
+  await expect(confirmHeading).toBeVisible();
+  await expect(page.locator("#older-backup-message")).toContainText(
+    "plus ancienne",
+  );
+  await expect(page.getByRole("alertdialog")).toBeVisible();
+  // The safer action (Annuler) is the one that receives focus by default.
+  await expect(
+    page.getByRole("button", { name: "Annuler", exact: true }),
+  ).toBeFocused();
+
+  // 2) Cancel: no false success, and — proven by unlocking normally right after — the
+  // on-device vault was genuinely never touched by the refused attempt.
+  await page.getByRole("button", { name: "Annuler", exact: true }).click();
+  await expect(confirmHeading).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "Restaurer votre sauvegarde" }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Annuler la restauration", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Ouvrir mon espace" }),
+  ).toBeVisible();
+  await page
+    .getByLabel("Phrase secrète", { exact: true })
+    .fill(restorePassphrase);
+  await page.getByRole("button", { name: "Déverrouiller", exact: true }).click();
+  await nav.getByRole("button", { name: "Mes comptes", exact: true }).click();
+  await expect(page.getByText("Compte récent fictif", { exact: true })).toBeVisible();
+  await expect(page.getByText("Compte ancien fictif", { exact: true })).toBeVisible();
+  await page
+    .getByRole("button", { name: "Verrouiller l’espace", exact: true })
+    .click();
+
+  // 3) Confirm explicitly this time: the older backup is restored, replacing the newer vault.
+  await selectOldBackupAndSubmit();
+  await expect(confirmHeading).toBeVisible();
+  await page
+    .getByRole("button", { name: "Restaurer quand même", exact: true })
+    .click();
+  await expect(confirmHeading).toHaveCount(0);
+  await expect(page.getByText("Compte ancien fictif", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Compte récent fictif", { exact: true }),
+  ).toHaveCount(0);
 
   expect(errors).toEqual([]);
 });
