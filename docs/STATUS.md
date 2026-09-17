@@ -1,21 +1,25 @@
 # Finance — état de reprise
 
-Mise à jour : 17 septembre 2026. Ce fichier décrit les faits vérifiés. Le plan définit les travaux futurs ; il ne constitue pas une preuve de livraison.
+Mise à jour : 17 septembre 2026 (session de finalisation nocturne). Ce fichier décrit les faits vérifiés. Le plan définit les travaux futurs ; il ne constitue pas une preuve de livraison.
+
+## Session nocturne du 17 septembre 2026 — résumé
+
+Reprise depuis le commit `1f7727a`, travail réparti entre plusieurs agents spécialisés (coordinateur, notion, données/sync, designer, frontend ×2, calculs, vérification indépendante — un agent différent de chaque auteur). Cinq défauts réels corrigés (devise non déduite du compte, virement sans compte source obligatoire, sélecteur de position non filtré, accessibilité du sélecteur de type, compression du libellé à 390px), une protection ajoutée (refus par défaut de restaurer une sauvegarde plus ancienne, avec confirmation explicite), un bug de calcul corrigé (réécriture rétroactive du montant des récurrences non réglées). Revue indépendante finale : **livrable tel quel, aucun défaut bloquant résiduel**. Détail complet dans l'historique Git de la branche `claude/finance-app-completion-k86h7n` (chaque commit décrit son propre lot) et dans le résumé de fin de session transmis à l'utilisateur.
 
 ## État des lots
 
 | Lot | État | Résultat et limite |
 | --- | --- | --- |
 | Audit de Finance1 | Terminé | Le dépôt contenait un traqueur d’habitudes. Son code est conservé dans `legacy/habitudes/` ; Finance réutilise React, TypeScript et Vite. |
-| Audit Notion | Terminé pour les sources accessibles | Budget 2026 actif, comptes, factures, revenus, abonnements et espace Trading examinés. Couverture et ambiguïtés détaillées dans le rapport privé séparé. Aucun secret ni identifiant personnel dans Git. |
-| Modèle et calculs | Développés et testés | Montants exacts, inconnus explicites, dates métier distinctes de l’import, transferts neutres, valorisation du compte ou de ses composantes. |
-| Coffre | Développé et testé | Chiffrement local, verrouillage, sauvegarde et restauration. Aucun serveur ni partage automatique entre appareils. |
-| Six pages et saisie | Développées et testées en navigateur | Pages liées, opérations, soldes datés, récurrences, objectifs, positions, documents, imports et sauvegardes. |
-| Import Notion privé | Préparé et testé dans un coffre temporaire | Import, réimport sans doublon, export comparé et réouverture vérifiés. Le fichier privé doit être importé dans le coffre choisi par l’utilisateur ; aucun coffre permanent n’a été installé sur ses appareils. |
+| Audit Notion | Terminé pour les sources accessibles, rapproché le 17/09 au soir | Budget 2026 actif, comptes, factures, revenus, abonnements et espace Trading examinés à nouveau. Aucune base « Patrimoine » exploitable actuellement, « Mouvements de Capital » et la base de positions restent à rapprocher manuellement (détail plus bas). Aucun secret ni identifiant personnel dans Git. |
+| Modèle et calculs | Développés et testés, corrigés le 17/09 au soir | Montants exacts, inconnus explicites, dates métier distinctes de l’import, transferts neutres, valorisation du compte ou de ses composantes. Un changement de montant de récurrence ne réécrit plus les occurrences non réglées passées (`amountEffectiveFrom`/`amountHistory`) ; limite : la date d'effet est toujours « aujourd'hui », pas de planification d'une hausse future depuis l'interface. |
+| Coffre | Développé, durci et testé le 17/09 au soir | Chiffrement local, verrouillage, sauvegarde et restauration. Sauvegardes désormais datées (`savedAt`, authentifié) ; restauration d'une sauvegarde plus ancienne que le coffre présent refusée par défaut avec confirmation explicite pour l'outrepasser (coffre courant jamais touché en cas de refus ou d'annulation). Aucun serveur ni partage automatique entre appareils ; ce refus ne s'applique pas à un coffre/une sauvegarde au format antérieur à `savedAt`. |
+| Six pages et saisie | Développées et testées en navigateur, fiabilisées et polies le 17/09 au soir | Pages liées, opérations, soldes datés, récurrences, objectifs, positions, documents, imports et sauvegardes. Les 8 parcours quotidiens (revenu, dépense, récurrence, solde, virement, objectif, position, reçu) vérifiés par clic réel, y compris par un relecteur indépendant sur les 4 les plus à risque. Cohérence visuelle revue sur les trois formats. |
+| Import Notion privé | Préparé et testé dans un coffre temporaire (session antérieure) | Import, réimport sans doublon, export comparé et réouverture vérifiés. Le fichier privé doit être importé dans le coffre choisi par l’utilisateur ; aucun coffre permanent n’a été installé sur ses appareils. Aucun fichier privé joint à la session du 17/09 au soir. |
 | Skill et agents | Réalisés et relus | Skill Finance, cinq références, neuf agents spécialisés, `AGENTS.md`, `CLAUDE.md` et point d’entrée simple. |
-| Publication GitHub | Livrée et vérifiée | Code publié sur `main` de `Mendestrading21/FINANCE1`, commit `c0d90a1e1fc67b2cc85eacb9f0e764aa575c015d`. Arbre Git distant identique aux fichiers vérifiés, historique conservé, skill relu depuis GitHub. CI distante réussie. |
-| Hébergement et appareils physiques | À réaliser | Aucun hébergement HTTPS ni domaine n’est configuré. Pas d’essai sur iPhone, iPad ou Windows physiques. |
-| Synchronisation bancaire ou cloud | Prévue, non développée | Nécessite une cible privée, des accès et une politique de conflits. Le mode livré utilise des sauvegardes chiffrées transférées manuellement. |
+| Publication GitHub | Livrée et vérifiée | Code publié sur la branche `claude/finance-app-completion-k86h7n` de `Mendestrading21/FINANCE1`, PR #1 (brouillon), CI verte sur chaque commit poussé cette nuit. Historique conservé depuis `c0d90a1`. |
+| Hébergement et appareils physiques | À réaliser | Aucun hébergement HTTPS ni domaine n’est configuré (détail et options plus bas). Pas d’essai sur iPhone, iPad ou Windows physiques, ni Safari/WebKit réel. |
+| Synchronisation bancaire ou cloud | Prévue, non développée | Nécessite une cible privée, des accès et une politique de conflits. Le mode livré utilise des sauvegardes chiffrées transférées manuellement (détail plus bas). |
 
 ## Données et vérité financière
 
@@ -27,20 +31,29 @@ Le rapprochement reste nécessaire avant de pouvoir donner un patrimoine ou un d
 
 ## Preuves
 
+Chiffres de la session nocturne du 17 septembre 2026, vérifiés indépendamment (relecteur distinct de chaque auteur) sur le commit final `HEAD` de `claude/finance-app-completion-k86h7n` :
+
 | Contrôle exécuté | Résultat |
 | --- | --- |
-| `pnpm run typecheck` | Réussi après le dernier correctif métier. |
-| `pnpm run test` | 68 tests réussis dans quatre fichiers ; dernière exécution par le relecteur indépendant. |
+| `pnpm run typecheck` | Réussi (`tsc -b --noEmit`, code de sortie 0). |
+| `pnpm run test` | **82 tests réussis dans 5 fichiers** (`finance.test.ts`, `validation.test.ts`, `importCsv.test.ts`, `vault.test.ts`, `Editor.test.ts`). |
 | `pnpm run build` | Réussi ; application et cache hors ligne construits, sans donnée privée. |
-| `pnpm run test:e2e` | Deux parcours réussis : coffre/saisie/verrouillage ; navigation/six pages/masquage/captures/import CSV et réimport sans doublon. Aucune erreur JavaScript relevée. |
-| `pnpm audit --json` | Aucune vulnérabilité signalée pour le lockfile contrôlé. |
-| Validation du skill | Validateur officiel `quick_validate.py` réussi ; missions et scénarios relus indépendamment. |
+| `pnpm run test:e2e` | **4 scénarios réels réussis** : coffre/saisie/verrouillage ; captures/navigation/six pages/masquage/import CSV et réimport sans doublon ; les 8 parcours quotidiens (revenu, virement multi-devises, récurrence, position filtrée, reçu depuis une ligne) ; restauration d'une sauvegarde plus ancienne (refus, annulation neutre, confirmation explicite). Aucune erreur JavaScript relevée. Limite d'environnement documentée : dans ce bac à sable, Chromium en mode single-process devient intermittent dès 3 tests e2e simultanés (`--workers=1 --retries=1` stabilise le résultat) ; chaque test rejoué isolément passe systématiquement du premier coup — confirmé indépendamment, pas une régression fonctionnelle. La CI GitHub Actions n'utilise pas ce mode single-process. |
+| `pnpm audit --audit-level high` | Aucune vulnérabilité signalée. |
+| Validation du skill | Validateur officiel `quick_validate.py` réussi (session antérieure) ; missions et scénarios relus indépendamment. |
 
-La [revue indépendante](REVUE_INDEPENDANTE.md) détaille les contre-exemples, corrections et limites. L’audit des dépendances ne remplace pas un audit de sécurité de l’application. Le runtime navigateur de cette session utilise Chromium 138 fourni par `@sparticuz/chromium` ; la CI est configurée pour installer le Chromium de Playwright. Les résultats de la session ne préjugent pas de cette exécution distante.
+La [revue indépendante](REVUE_INDEPENDANTE.md) (session antérieure) détaille les contre-exemples, corrections et limites déjà couverts sur le moteur, le coffre, l'import CSV et le skill. Cette session nocturne a ajouté une seconde revue indépendante, ciblée sur les changements du soir (coffre/sauvegardes, design, 8 parcours, récurrences, Notion) : **verdict livrable, aucun défaut bloquant résiduel**, limites listées ci-dessous. L’audit des dépendances ne remplace pas un audit de sécurité de l’application.
 
-**Preuve distante distincte :** le workflow [Finance verification — 35276381751](https://github.com/Mendestrading21/FINANCE1/actions/runs/35276381751) a terminé avec succès sur le commit applicatif ci-dessus : installation figée, TypeScript, tests, build, Chromium Playwright, parcours navigateur, audit et captures en artefact. Le présent ajout documentaire consigne ce résultat après sa vérification ; un changement ultérieur doit être revérifié.
+**Preuve distante :** CI GitHub Actions (`Finance verification`) verte sur chaque commit poussé cette nuit sur `claude/finance-app-completion-k86h7n`, y compris le commit final — voir la PR #1. Historique CI antérieur : [run 35276381751](https://github.com/Mendestrading21/FINANCE1/actions/runs/35276381751) sur le commit `c0d90a1`.
 
-L’import réel a passé un parcours privé distinct : deux imports identiques, absence de libellés en clair dans le stockage, comparaison après export, verrouillage et déverrouillage, aucune erreur JavaScript. Le coffre de test a été supprimé ; aucune capture contenant des finances personnelles n’a été produite.
+L’import réel (session antérieure) a passé un parcours privé distinct : deux imports identiques, absence de libellés en clair dans le stockage, comparaison après export, verrouillage et déverrouillage, aucune erreur JavaScript. Le coffre de test a été supprimé ; aucune capture contenant des finances personnelles n’a été produite.
+
+### Limites résiduelles honnêtes (session du 17/09 au soir)
+
+- Aucun test Safari/WebKit réel ni appareil physique iPhone/iPad/Windows : uniquement Chromium émulé (1440/834/390 px).
+- Le refus de restauration d'une sauvegarde plus ancienne ne protège pas un coffre ou une sauvegarde au format antérieur au champ `savedAt` (comportement testé et assumé, rétrocompatibilité volontaire).
+- Aucune date d'effet différée n'est réglable pour un changement de montant de récurrence depuis l'interface (toujours « aujourd'hui »).
+- Le quota Notion (requêtes de bases) a de nouveau été atteint en cours d'audit ; certaines vérifications de doublons (Factures, Revenus, Abonnements) n'ont pas pu être terminées.
 
 ## Captures réelles
 
@@ -69,9 +82,10 @@ Le coffre est local au navigateur (Web Crypto + `localStorage`) ; il n'existe au
 
 ## Prochain travail concret
 
-1. Choisir et configurer un hébergement statique HTTPS pour l’application ; le coffre reste local tant qu’une synchronisation privée n’est pas développée. Vérifier CSP, cache et absence de fichiers privés dans le build.
-2. Ouvrir Finance sur les appareils, créer le coffre avec une phrase choisie par l’utilisateur, importer le fichier privé puis conserver une sauvegarde chiffrée et vérifier sa restauration.
-3. Rapprocher les informations signalées avec les relevés et sources, sans remplacer les inconnus par zéro.
-4. Vérifier les parcours sur Safari iPhone/iPad et Edge Windows, puis décider si la synchronisation privée est nécessaire.
+1. **Décider d'une cible d'hébergement** (GitHub Pages sur dépôt privé nécessite un forfait payant ou de le rendre public ; sinon un hébergeur statique tiers avec un compte à créer) — décision qui revient à Elio, voir la section Hébergement ci-dessus. Une fois choisie : configurer le déploiement, vérifier CSP/cache/absence de fichiers privés dans le build (déjà en place côté code), puis contrôler l'URL obtenue.
+2. Ouvrir Finance sur les appareils, créer le coffre avec une phrase choisie par l’utilisateur, importer le fichier privé (à fournir par Elio) puis conserver une sauvegarde chiffrée et vérifier sa restauration.
+3. Rapprocher les informations signalées avec les relevés et sources, sans remplacer les inconnus par zéro : en particulier, aucune base « Patrimoine » de Budget 2026 ne fournit aujourd'hui de registre de comptes, et aucune position de la base « Mes Actifs »/« Performances 2026 » n'a de quantité/prix/devise/date prouvés.
+4. Vérifier les parcours sur Safari iPhone/iPad et Edge Windows (appareils physiques ou émulateurs officiels), puis décider si la synchronisation privée est nécessaire.
+5. Fusionner la PR #1 vers `main` une fois relue par Elio (actuellement en brouillon, CI verte).
 
 Lire [DEMARRER_CLAUDE.md](../DEMARRER_CLAUDE.md) pour reprendre. Toute nouvelle session commence par le dépôt et les accès réels ; elle ne reprend pas un total de tests ou une publication comme une preuve valable après de nouvelles modifications.
