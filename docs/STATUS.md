@@ -13,7 +13,7 @@ Mise à jour : 17 septembre 2026. Ce fichier décrit les faits vérifiés. Le pl
 | Six pages et saisie | Développées et testées en navigateur | Pages liées, opérations, soldes datés, récurrences, objectifs, positions, documents, imports et sauvegardes. |
 | Import Notion privé | Préparé et testé dans un coffre temporaire | Import, réimport sans doublon, export comparé et réouverture vérifiés. Le fichier privé doit être importé dans le coffre choisi par l’utilisateur ; aucun coffre permanent n’a été installé sur ses appareils. |
 | Skill et agents | Réalisés et relus | Skill Finance, cinq références, neuf agents spécialisés, `AGENTS.md`, `CLAUDE.md` et point d’entrée simple. |
-| Publication GitHub | Livraison du code | Le commit contenant ces fichiers est destiné à `main` de `Mendestrading21/FINANCE1`, en conservant l’historique. L’état distant et la CI se vérifient dans GitHub ; les contrôles locaux ci-dessous ne prouvent pas un résultat de CI distante. |
+| Publication GitHub | Livrée et vérifiée | Code publié sur `main` de `Mendestrading21/FINANCE1`, commit `c0d90a1e1fc67b2cc85eacb9f0e764aa575c015d`. Arbre Git distant identique aux fichiers vérifiés, historique conservé, skill relu depuis GitHub. CI distante réussie. |
 | Hébergement et appareils physiques | À réaliser | Aucun hébergement HTTPS ni domaine n’est configuré. Pas d’essai sur iPhone, iPad ou Windows physiques. |
 | Synchronisation bancaire ou cloud | Prévue, non développée | Nécessite une cible privée, des accès et une politique de conflits. Le mode livré utilise des sauvegardes chiffrées transférées manuellement. |
 
@@ -35,6 +35,8 @@ Le rapprochement reste nécessaire avant de pouvoir donner un patrimoine ou un d
 | Validation du skill | Validateur officiel `quick_validate.py` réussi ; missions et scénarios relus indépendamment. |
 
 La [revue indépendante](REVUE_INDEPENDANTE.md) détaille les contre-exemples, corrections et limites. L’audit des dépendances ne remplace pas un audit de sécurité de l’application. Le runtime navigateur de cette session utilise Chromium 138 fourni par `@sparticuz/chromium` ; la CI est configurée pour installer le Chromium de Playwright. Les résultats de la session ne préjugent pas de cette exécution distante.
+
+**Preuve distante distincte :** le workflow [Finance verification — 35276381751](https://github.com/Mendestrading21/FINANCE1/actions/runs/35276381751) a terminé avec succès sur le commit applicatif ci-dessus : installation figée, TypeScript, tests, build, Chromium Playwright, parcours navigateur, audit et captures en artefact. Le présent ajout documentaire consigne ce résultat après sa vérification ; un changement ultérieur doit être revérifié.
 
 L’import réel a passé un parcours privé distinct : deux imports identiques, absence de libellés en clair dans le stockage, comparaison après export, verrouillage et déverrouillage, aucune erreur JavaScript. Le coffre de test a été supprimé ; aucune capture contenant des finances personnelles n’a été produite.
 
