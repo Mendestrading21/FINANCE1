@@ -59,6 +59,12 @@ const sample = (): FinanceData => ({
   ],
 });
 
+function toB64(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
 beforeEach(() => {
   local = new MemoryStorage();
   vi.stubGlobal("localStorage", local);
@@ -66,6 +72,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe("coffre privé avec le vrai Web Crypto", () => {
@@ -175,6 +182,8 @@ describe("coffre privé avec le vrai Web Crypto", () => {
         cipher: { ...envelope.cipher, iv: "!!!!!!!!!!!!====" },
       }),
       JSON.stringify({ ...envelope, ciphertext: "%%%%" }),
+      JSON.stringify({ ...envelope, savedAt: "2026/01/01" }),
+      JSON.stringify({ ...envelope, savedAt: 20260101 }),
     ];
     for (const raw of invalid) {
       await expect(importVault(raw, PASSPHRASE)).rejects.toThrow(
@@ -245,5 +254,155 @@ describe("coffre privé avec le vrai Web Crypto", () => {
       "inaccessible",
     );
     expect(local.length).toBe(0);
+  });
+
+  it("ne laisse aucun coffre à moitié écrit si le stockage est plein dès la création, et permet de réessayer", async () => {
+    local.failWrites = true;
+    await expect(createVault(PASSPHRASE, sample())).rejects.toThrow(
+      "Enregistrement impossible",
+    );
+    // A failed first write must not leave a corrupt or partial vault behind.
+    expect(vaultExists()).toBe(false);
+    expect(local.length).toBe(0);
+    local.failWrites = false;
+    await createVault(PASSPHRASE, sample());
+    expect((await unlockVault(PASSPHRASE)).data).toEqual(sample());
+  });
+
+  it("répète la même erreur pour de nombreuses phrases incorrectes d’affilée, sans dégrader le coffre ni bloquer une tentative correcte", async () => {
+    await createVault(PASSPHRASE, sample());
+    const before = exportVault();
+    const messages = new Set<string>();
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const failure = await unlockVault(`Mauvaise phrase numéro ${attempt}`).catch(
+        (error) => error as Error,
+      );
+      expect(failure).toBeInstanceOf(Error);
+      messages.add((failure as Error).message);
+      // Storage must be byte-identical after every single failed attempt, not just the last one.
+      expect(exportVault()).toBe(before);
+    }
+    // One identical message regardless of attempt count or content: no information leak,
+    // no counter visible in the error, nothing that would tell an attacker they are close.
+    expect(messages.size).toBe(1);
+    // No lockout of any kind: the very next attempt, if correct, opens immediately.
+    const opened = await unlockVault(PASSPHRASE);
+    expect(opened.data).toEqual(sample());
+    expect(exportVault()).toBe(before);
+  });
+
+  it("refuse par défaut de restaurer une sauvegarde plus ancienne que le coffre déjà présent, sans y toucher", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const key = await createVault(PASSPHRASE, sample());
+    const oldBackup = exportVault();
+    vi.setSystemTime(new Date("2030-06-01T00:00:00.000Z"));
+    const newer: FinanceData = {
+      ...emptyData(),
+      preferences: { baseCurrency: "EUR", locale: "fr-CH" },
+    };
+    await saveVault(key, newer);
+    vi.useRealTimers();
+    const before = exportVault();
+    await expect(importVault(oldBackup, PASSPHRASE)).rejects.toThrow(
+      "plus ancienne",
+    );
+    // The newer vault already on this device must survive the refused restore untouched.
+    expect(exportVault()).toBe(before);
+    expect((await unlockVault(PASSPHRASE)).data).toEqual(newer);
+    // An explicit, deliberate confirmation still allows reverting to the older backup.
+    const restored = await importVault(oldBackup, PASSPHRASE, true);
+    expect(restored.data).toEqual(sample());
+    expect((await unlockVault(PASSPHRASE)).data).toEqual(sample());
+  });
+
+  it("ne bloque jamais la restauration d’une sauvegarde quand aucun coffre n’existe encore sur l’appareil", async () => {
+    await createVault(PASSPHRASE, sample());
+    const backup = exportVault();
+    local.clear();
+    // Fresh device: nothing to compare the backup's date against, so it must always apply.
+    const restored = await importVault(backup, PASSPHRASE);
+    expect(restored.data).toEqual(sample());
+  });
+
+  it("ne bloque pas une restauration quand le coffre présent sur l’appareil n’a pas de date (format antérieur à ce champ)", async () => {
+    // Simulate a vault written before `savedAt` existed: strip it from a real, currently
+    // installed envelope without touching anything that authenticates it. This entry is
+    // never decrypted in this scenario, only its plaintext metadata is inspected.
+    await createVault(PASSPHRASE, sample());
+    const undated = JSON.parse(exportVault()) as Record<string, unknown>;
+    delete undated.savedAt;
+    local.clear();
+    const OTHER_PASSPHRASE = "Un autre coffre très privé";
+    const newer: FinanceData = {
+      ...emptyData(),
+      preferences: { baseCurrency: "USD", locale: "fr-CH" },
+    };
+    await createVault(OTHER_PASSPHRASE, newer);
+    const newerBackup = exportVault();
+    local.clear();
+    local.setItem("finance.vault.v1", JSON.stringify(undated));
+    // An undated current vault can never be proven newer, so a dated backup must be allowed.
+    const restored = await importVault(newerBackup, OTHER_PASSPHRASE);
+    expect(restored.data).toEqual(newer);
+  });
+
+  it("ne bloque pas une restauration quand la sauvegarde elle-même n’a pas de date (format antérieur à ce champ)", async () => {
+    // Build an envelope exactly as the pre-`savedAt` format did: the field is absent from
+    // both the JSON and the authenticated data, so it must still open and never be treated
+    // as older than anything, regardless of when the current vault was saved.
+    const key = await createVault(PASSPHRASE, sample());
+    const current = JSON.parse(exportVault()) as {
+      kdf: { salt: string; iterations: number };
+    };
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const metadata = {
+      format: "Finance",
+      version: 1,
+      kdf: {
+        name: "PBKDF2",
+        hash: "SHA-256",
+        iterations: current.kdf.iterations,
+        salt: current.kdf.salt,
+      },
+      cipher: { name: "AES-GCM", iv: toB64(iv), tagLength: 128 },
+    };
+    const additionalData = new TextEncoder().encode(
+      JSON.stringify([
+        metadata.format,
+        metadata.version,
+        metadata.kdf.name,
+        metadata.kdf.hash,
+        metadata.kdf.iterations,
+        metadata.kdf.salt,
+        metadata.cipher.name,
+        metadata.cipher.iv,
+        metadata.cipher.tagLength,
+      ]),
+    );
+    const legacyData: FinanceData = {
+      ...emptyData(),
+      preferences: { baseCurrency: "USD", locale: "fr-CH" },
+    };
+    const ciphertext = await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv, tagLength: 128, additionalData },
+      key,
+      new TextEncoder().encode(JSON.stringify(legacyData)),
+    );
+    const legacyBackup = JSON.stringify({
+      ...metadata,
+      ciphertext: toB64(new Uint8Array(ciphertext)),
+    });
+    expect(JSON.parse(legacyBackup).savedAt).toBeUndefined();
+    // Move the current vault far into the future first: an undated backup must still be
+    // accepted afterwards, because nothing here is entitled to assume it is older.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2031-01-01T00:00:00.000Z"));
+    await saveVault(key, {
+      ...sample(),
+      preferences: { baseCurrency: "EUR", locale: "fr-CH" },
+    });
+    vi.useRealTimers();
+    const restored = await importVault(legacyBackup, PASSPHRASE);
+    expect(restored.data).toEqual(legacyData);
   });
 });
