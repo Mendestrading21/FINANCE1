@@ -1231,7 +1231,7 @@ export default function App() {
                   : page === "accounts"
                     ? "Chaque compte, avec sa devise et la date de son solde."
                     : page === "subscriptions"
-                      ? "Ce qui est dû ce mois-ci, ce qui est réglé et ce qui reste."
+                      ? "Abonnements, factures et charges récurrentes : ce qui est dû ce mois-ci, ce qui est réglé et ce qui reste."
                       : page === "goals"
                         ? "Donnez une place à ce qui compte pour vous."
                         : page === "investments"

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 const passphrase = "Exemple-test-Finance-2026"; // Synthetic test credential; never used for a real vault.
 test("private vault: account, dated balance, operation, lock, wrong password, reload", async ({
   page,
@@ -914,4 +914,66 @@ test("review items: an unbroken long reason from an import wraps instead of over
     ),
   ).toBe(true);
   expect(errors).toEqual([]);
+});
+
+// Regression: sw.js's install/activate handlers used to omit skipWaiting()/clients.claim(), so a
+// newly deployed shell stayed "waiting" and an already-open tab (or installed PWA) kept serving
+// the OLD cached shell indefinitely — until every tab was fully closed and reopened, not merely
+// reloaded. In practice this meant a page or fix shipped in a later release could stay invisible
+// to a user who already had the app open, with no obvious way to tell why (this is exactly what
+// happened with the Abonnements page). This test builds against the repo's own dist/ (built by
+// test:e2e's setup, same as every other test here) and simulates a *second* deploy by editing
+// dist/sw.js's cache version and dist/index.html's content directly — rebuilding a second time via
+// vite would be slower and isn't needed to exercise the service worker logic itself, which is what
+// this test targets. It then asks the browser to check for an update and confirms the ALREADY OPEN
+// tab picks up the new content on its own, without the test ever closing the browser context.
+test("PWA update: a new deploy reaches an already-open tab without closing it", async ({
+  page,
+}) => {
+  const swPath = "dist/sw.js";
+  const indexPath = "dist/index.html";
+  const originalSw = await readFile(swPath, "utf8");
+  const originalIndex = await readFile(indexPath, "utf8");
+
+  try {
+    await page.goto("/");
+    await page.waitForFunction(
+      () => navigator.serviceWorker.controller !== null,
+      null,
+      { timeout: 15000 },
+    );
+
+    const marker = `test-marker-${Date.now()}`;
+    await writeFile(
+      indexPath,
+      originalIndex.replace(
+        "<title>",
+        `<meta name="test-marker" content="${marker}" /><title>`,
+      ),
+    );
+    await writeFile(
+      swPath,
+      originalSw.replace(/finance-shell-[a-z0-9]+/, `finance-shell-${marker}`),
+    );
+
+    await page.evaluate(async () => {
+      const registration = await navigator.serviceWorker.getRegistration();
+      await registration?.update();
+    });
+
+    // main.tsx reloads the tab once its controller changes (the new service worker taking over) —
+    // wait for that effect rather than reloading manually, since a manual reload would not prove
+    // the fix actually delivers the update on its own.
+    await page.waitForFunction(
+      (expected) =>
+        document.querySelector('meta[name="test-marker"]')?.getAttribute(
+          "content",
+        ) === expected,
+      marker,
+      { timeout: 15000 },
+    );
+  } finally {
+    await writeFile(indexPath, originalIndex);
+    await writeFile(swPath, originalSw);
+  }
 });
