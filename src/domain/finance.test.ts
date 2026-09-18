@@ -565,6 +565,54 @@ describe("mois et récurrences", () => {
     });
     expect(monthSummary(d, "2026-09", "CHF").remaining).toBeNull();
   });
+  it("exclut une mise de côté réglée de expenseSettled, sans la confondre avec une vraie dépense", () => {
+    const saving = recurrence({
+      id: "saving",
+      recurrenceType: "saving",
+      amountMinor: 20000,
+      day: 5,
+      startDate: "2026-01-05",
+    });
+    const savingSettled = transaction({
+      id: "saving:2026-09-05",
+      amountMinor: 20000,
+      status: "settled",
+      date: "2026-09-05",
+      recurrenceId: "saving",
+      occurrenceDate: "2026-09-05",
+    });
+    const realExpense = transaction({
+      id: "groceries",
+      status: "settled",
+      amountMinor: 15000,
+    });
+    const d = data({
+      recurrences: [saving],
+      transactions: [savingSettled, realExpense],
+    });
+    expect(monthSummary(d, "2026-09", "CHF")).toMatchObject({
+      expenseSettled: 15000, // not 35000 (20000 de mise de côté + 15000 de vraie dépense)
+    });
+  });
+  it("une mise de côté réglée sans date n’incrémente pas unknownCount (hors périmètre, pas inconnue)", () => {
+    const saving = recurrence({
+      id: "saving",
+      recurrenceType: "saving",
+      amountMinor: 20000,
+      day: 5,
+      startDate: "2026-01-05",
+    });
+    const savingUndated = transaction({
+      id: "saving-undated",
+      amountMinor: 20000,
+      status: "settled",
+      date: null,
+      recurrenceId: "saving",
+      occurrenceDate: "2026-09-05",
+    });
+    const d = data({ recurrences: [saving], transactions: [savingUndated] });
+    expect(monthSummary(d, "2026-09", "CHF").unknownCount).toBe(0);
+  });
 });
 
 // The mandatory example from abonnements.md "Calculs": a 100 CHF charge due 28 February, paid

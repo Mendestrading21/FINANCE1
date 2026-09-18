@@ -515,6 +515,20 @@ export function monthSummary(
   month: string,
   currency: string,
 ): MonthSummary {
+  // A `saving` recurrence (mise de côté) is out of scope here exactly like a transfer, per
+  // abonnements.md "les transferts et mises de côté ne gonflent pas dépenses et revenus" —
+  // its own `kind` is only ever "income"/"expense" (see Recurrence in types.ts), never
+  // "transfer", so it must be recognized by its linked recurrence's classification, not by
+  // the transaction's own kind. cohortSummary/recurringFlowSummary already honor this; this
+  // mirrors that exclusion for the realized-flow totals Mon mois and Accueil actually show.
+  const savingRecurrenceIds = new Set(
+    data.recurrences
+      .filter((r) => r.recurrenceType === "saving")
+      .map((r) => r.id),
+  );
+  const outOfScope = (t: Transaction) =>
+    t.kind === "transfer" ||
+    (!!t.recurrenceId && savingRecurrenceIds.has(t.recurrenceId));
   const buckets = {
     incomePlanned: [] as number[],
     incomeSettled: [] as number[],
@@ -524,10 +538,10 @@ export function monthSummary(
   // Undated income/expense cannot be assigned to a month: disclose incomplete projection.
   let unknownCount =
     data.transactions.filter(
-      (t) => t.kind !== "transfer" && t.date === null && !t.budgetMonth,
+      (t) => !outOfScope(t) && t.date === null && !t.budgetMonth,
     ).length + data.reviewItems.length;
   for (const transaction of transactionsForMonth(data, month)) {
-    if (transaction.kind === "transfer") continue;
+    if (outOfScope(transaction)) continue;
     // A budget month is not evidence of the month in which money was settled.
     if (
       transaction.status === "unknown" ||
