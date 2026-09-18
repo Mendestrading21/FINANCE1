@@ -20,6 +20,7 @@ import {
   money,
   monthLabel,
   monthSummary,
+  rankAccounts,
   today,
   transactionsForMonth,
   wealthSummary,
@@ -603,6 +604,13 @@ export default function App() {
     );
   const available = availableSummary(data, currency, month);
   const wealth = wealthSummary(data, currency),
+    accountRanking = rankAccounts(data, currency),
+    // Largest to smallest comparable value first (docs/AUDIT_UI_V2.md), then accounts
+    // without a common rate/date — never given a guessed position among the ranked ones.
+    sortedAccounts = [
+      ...accountRanking.ranked.map((r) => r.item),
+      ...accountRanking.toValue,
+    ],
     summary = monthSummary(data, month, currency),
     transactions = transactionsForMonth(data, month),
     currentPage = pages.find((p) => p.id === page)!;
@@ -1138,7 +1146,7 @@ export default function App() {
               </button>
             </div>
             <div className="account-grid">
-              {data.accounts.slice(0, 3).map(accountCard)}
+              {sortedAccounts.slice(0, 3).map(accountCard)}
               {!data.accounts.length && (
                 <div className="empty-state">
                   <Icon name="wallet" size={30} />
@@ -1387,7 +1395,7 @@ export default function App() {
               Les soldes conservent leur date d’observation. Les opérations du
               mois ne les modifient pas automatiquement.
             </div>
-            <div className="account-grid">{data.accounts.map(accountCard)}</div>
+            <div className="account-grid">{sortedAccounts.map(accountCard)}</div>
             {!data.accounts.length && (
               <div className="empty-state">
                 Ajoutez votre premier compte ou importez un fichier Finance.
@@ -1483,7 +1491,7 @@ export default function App() {
               )}
             </Card>
             <div className="account-grid">
-              {data.accounts
+              {sortedAccounts
                 .filter((a) => a.kind === "investment")
                 .map(accountCard)}
             </div>
