@@ -604,6 +604,7 @@ describe("cohorte d'échéances (occurrenceCohort)", () => {
         currency: "CHF",
         accountId: "bank",
         kind: "expense",
+        recurrenceType: "bill",
         label: "Loyer",
         settled: {
           transactionId: "rent:2026-02-28",
@@ -756,6 +757,20 @@ describe("résumé de la cohorte (cohortSummary)", () => {
     expect(summary.activeCount).toBe(2); // counts both regardless of kind
     expect(occurrenceCohort(d, "2026-02")).toHaveLength(2); // income still in the cohort itself
   });
+  it("exclut une mise de côté de l'agrégat dû/réglé, sans la faire disparaître ailleurs", () => {
+    const saving = recurrence({
+      id: "saving",
+      recurrenceType: "saving",
+      amountMinor: 20000,
+      day: 5,
+      startDate: "2026-01-05",
+    });
+    const d = data({ recurrences: [lateRecurrence, saving] });
+    const summary = cohortSummary(d, "2026-02", "CHF");
+    expect(summary.dueMinor).toBe(10000); // only the bill, not +20000 of saving
+    expect(summary.activeCount).toBe(2); // counts both regardless of classification
+    expect(occurrenceCohort(d, "2026-02")).toHaveLength(2); // saving still in the cohort itself
+  });
   it("compte les récurrences actives même sans occurrence due ce mois-ci", () => {
     const quarterly = recurrence({
       id: "insurance",
@@ -851,6 +866,32 @@ describe("flux réalisé récurrent (recurringFlowSummary)", () => {
     expect(recurringFlowSummary(d, "2026-02", "CHF")).toMatchObject({
       paidMinor: 0,
       receivedMinor: 500000,
+    });
+  });
+  it("exclut une mise de côté réglée : elle ne gonfle pas payé ni reçu", () => {
+    const saving = recurrence({
+      id: "saving",
+      recurrenceType: "saving",
+      amountMinor: 20000,
+      day: 5,
+      startDate: "2026-01-05",
+    });
+    const savingSettled = transaction({
+      id: "saving:2026-02-05",
+      amountMinor: 20000,
+      status: "settled",
+      date: "2026-02-05",
+      recurrenceId: "saving",
+      occurrenceDate: "2026-02-05",
+    });
+    const d = data({
+      recurrences: [lateRecurrence, saving],
+      transactions: [settledInMarch, savingSettled],
+    });
+    expect(recurringFlowSummary(d, "2026-02", "CHF")).toMatchObject({
+      paidMinor: 0, // not +20000 of the settled saving occurrence
+      receivedMinor: 0,
+      partial: false,
     });
   });
   it("ignore un lien non lié à une récurrence et une opération encore planifiée", () => {

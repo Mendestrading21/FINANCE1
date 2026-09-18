@@ -18,6 +18,7 @@ import {
 import {
   availableSummary,
   cohortSummary,
+  convertMinor,
   latestBalance,
   money,
   monthLabel,
@@ -675,13 +676,38 @@ export default function App() {
   const subsInactive = data.recurrences
     .filter((r) => !r.active && subsMatchesType(r))
     .sort((a, b) => a.label.localeCompare(b.label));
-  const subsSortedActive =
+  // "Montant mensuel" compares recurrences that can carry different currencies, so the raw
+  // per-currency equivalent from monthlyEquivalentMinor is not comparable on its own — it must
+  // be converted to the display currency first, exactly like rankAccounts/accountValue already
+  // do for accounts. A missing rate goes to the unranked tail instead of comparing incomparable
+  // numbers or silently dropping the item.
+  const subsAmountRanking =
     subsSort === "amount"
       ? rankByValue(
           subsActive,
-          (r) => ({ valueMinor: monthlyEquivalentMinor(r), valuationDate: today() }),
+          (r) => {
+            const at = today();
+            const convertedMinor = convertMinor(
+              monthlyEquivalentMinor(r, at),
+              r.currency,
+              currency,
+              data.fxRates,
+              at,
+            );
+            return {
+              valueMinor: convertedMinor,
+              valuationDate: convertedMinor === null ? null : at,
+            };
+          },
           (r) => r.id,
-        ).ranked.map((v) => v.item)
+        )
+      : null;
+  const subsSortedActive =
+    subsAmountRanking !== null
+      ? [
+          ...subsAmountRanking.ranked.map((v) => v.item),
+          ...subsAmountRanking.toValue,
+        ]
       : [...subsActive].sort((a, b) => {
           const da = nextOccurrenceDate(a),
             db = nextOccurrenceDate(b);
@@ -1602,7 +1628,10 @@ export default function App() {
                       : "—",
                 },
                 {
-                  label: "Abonnements et charges actifs",
+                  // Matches cohortSummary's activeCount exactly: every active recurrence,
+                  // any kind or classification (revenus et mises de côté compris) — the label
+                  // must not promise a narrower scope than what is actually counted.
+                  label: "Récurrences actives",
                   value: String(subsCohort.activeCount),
                 },
               ].map((s) => (

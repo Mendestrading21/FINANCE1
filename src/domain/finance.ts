@@ -242,6 +242,7 @@ export type OccurrenceCohortItem = {
   currency: string;
   accountId: string | null;
   kind: "income" | "expense";
+  recurrenceType: Recurrence["recurrenceType"];
   label: string;
   /** The settled transaction linked to this occurrence, whichever month it actually
    * happened in — null while still due. Only status "settled" closes an occurrence; one
@@ -288,6 +289,7 @@ export function occurrenceCohort(
       currency: recurrence.currency,
       accountId: recurrence.accountId,
       kind: recurrence.kind,
+      recurrenceType: recurrence.recurrenceType,
       label: recurrence.label,
       settled: settledTransaction
         ? {
@@ -317,17 +319,22 @@ export type CohortSummary = {
 /** amelioration-v2.md's résumé compact for expense-kind recurring occurrences: "Dû en <mois>",
  * "Réglé pour <mois>" and "Reste dû", each converted to `currency`. Income recurrences don't
  * fit "due" framing and are excluded from this aggregate — their own settlement still shows
- * per-occurrence (`occurrenceCohort`) and in the realized flow (`monthSummary`). `activeCount`
- * counts every active recurrence regardless of kind. A month with no due occurrence at all is
- * a confident, computed 0 — that absence is a fact about the recurrence rules, not a missing
- * observation — but a missing FX rate on any due or settled amount makes the whole trio
- * null/partial instead of silently treating that one item as zero, mirroring wealthSummary. */
+ * per-occurrence (`occurrenceCohort`) and in the realized flow (`monthSummary`). A `saving`
+ * recurrence (mise de côté) is excluded too, per abonnements.md "les transferts et mises de
+ * côté ne gonflent pas dépenses et revenus" — it still shows per-occurrence in `occurrenceCohort`
+ * itself. `activeCount` counts every active recurrence regardless of kind or classification. A
+ * month with no due occurrence at all is a confident, computed 0 — that absence is a fact about
+ * the recurrence rules, not a missing observation — but a missing FX rate on any due or settled
+ * amount makes the whole trio null/partial instead of silently treating that one item as zero,
+ * mirroring wealthSummary. */
 export function cohortSummary(
   data: FinanceData,
   month: string,
   currency: string,
 ): CohortSummary {
-  const items = occurrenceCohort(data, month).filter((i) => i.kind === "expense");
+  const items = occurrenceCohort(data, month).filter(
+    (i) => i.kind === "expense" && i.recurrenceType !== "saving",
+  );
   const dueParts: number[] = [];
   const settledParts: number[] = [];
   let excluded = 0;
@@ -394,12 +401,17 @@ export function recurringFlowSummary(
   month: string,
   currency: string,
 ): RecurringFlowSummary {
+  // A recurrence's own `kind` is only ever "income"/"expense" (see Recurrence in types.ts),
+  // never "transfer" — so a `saving` recurrence's linked transactions must be recognized by
+  // this lookup, not by `t.kind`, to actually honor "les mises de côté ne gonflent pas..." above.
+  const recurrenceById = new Map(data.recurrences.map((r) => [r.id, r]));
   const paidParts: number[] = [];
   const receivedParts: number[] = [];
   let excluded = 0;
   for (const t of transactionsForMonth(data, month)) {
     if (!t.recurrenceId || t.status !== "settled" || t.kind === "transfer")
       continue;
+    if (recurrenceById.get(t.recurrenceId)?.recurrenceType === "saving") continue;
     if (t.date === null) {
       excluded++;
       continue;
