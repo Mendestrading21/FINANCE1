@@ -1,6 +1,6 @@
 # Finance — état de reprise
 
-Mise à jour : 18 septembre 2026 (lots V2.1 à V2.7 livrés, V2.8 — passe de vérification finale — effectuée sur la PR #5 encore en brouillon). Ce fichier décrit les faits vérifiés. Le plan V2 décrit le travail suivant ; il ne constitue pas une preuve que ces améliorations sont déjà dans l’application au-delà de ce qui est explicitement marqué développé/testé ci-dessous.
+Mise à jour : 18 septembre 2026 (lots V2.1 à V2.8 livrés et fusionnés dans `main` ; correctif du mécanisme de mise à jour PWA en cours de publication). Ce fichier décrit les faits vérifiés. Le plan V2 décrit le travail suivant ; il ne constitue pas une preuve que ces améliorations sont déjà dans l’application au-delà de ce qui est explicitement marqué développé/testé ci-dessous.
 
 ## Lot V2.1 — Modèle récurrent (développé et testé le 18 septembre 2026)
 
@@ -127,9 +127,9 @@ Corrigé par `overflow-wrap: anywhere` sur `.review-item p`. Test e2e dédié aj
 
 Preuves : `pnpm run typecheck` (0 erreur), `pnpm run test` (**135/135**, inchangé), `pnpm run build` (réussi), les 8 scénarios `test:e2e` rejoués individuellement (le bac à sable Chromium single-process reste intermittent en exécution groupée, limite déjà documentée, pas une régression).
 
-## Lot V2.8 — Livraison finale (vérification effectuée le 18 septembre 2026, publication en attente)
+## Lot V2.8 — Livraison finale (vérifiée et publiée le 18 septembre 2026)
 
-Critère du plan : « Typecheck, tests, build, E2E, CI, Pages et reprise Claude documentés. » Passe de vérification finale sur le HEAD actuel de `claude/finance-app-completion-k86h7n` (commit `da0745c`, PR #5) :
+Critère du plan : « Typecheck, tests, build, E2E, CI, Pages et reprise Claude documentés. » Passe de vérification finale sur la PR #5 (titre et description mis à jour pour refléter les sept lots livrés V2.1–V2.7 au lieu des cinq initiaux) :
 
 - `pnpm run typecheck` : 0 erreur.
 - `pnpm run test` : **135/135**, 6 fichiers.
@@ -137,10 +137,23 @@ Critère du plan : « Typecheck, tests, build, E2E, CI, Pages et reprise Claude 
 - `pnpm audit --audit-level high` : aucune vulnérabilité.
 - `pnpm run test:e2e` : les **8** scénarios (et non 9, erreur de comptage corrigée dans la section précédente) rejoués individuellement, tous verts.
 - CI (`Finance verification`, workflow `verify.yml`) : succès sur les deux derniers commits de la PR #5 (`c8a7174`, `da0745c`).
-- GitHub Pages : le workflow de déploiement (`pages.yml`) est vérifié fonctionnel depuis le lot d'hébergement initial (voir « Preuves vérifiées avant la tranche V2 ») ; le site public reflète encore `main` à son dernier commit fusionné, pas le contenu de cette PR tant qu'elle n'est pas fusionnée — c'est attendu, pas un défaut.
-- Reprise Claude : `DEMARRER_CLAUDE.md` reste valable tel quel (il demande explicitement de revérifier l'état courant plutôt que de faire confiance aux SHA ou totaux historiques) ; aucune modification nécessaire.
 
-Titre et description de la PR #5 mis à jour pour refléter les sept lots livrés (V2.1–V2.7) au lieu des cinq initiaux. La PR reste **en brouillon** : la fusion vers `main` (et donc la mise à jour réelle du site public) est une décision distincte, pas encore prise.
+**Fusionnée dans `main`** (commit de fusion `12f1d1d`) et **déployée** : CI et le workflow GitHub Pages (`pages.yml`) tous deux verts sur ce commit, site public à jour sur `https://mendestrading21.github.io/Finances/`. Reprise Claude : `DEMARRER_CLAUDE.md` reste valable tel quel (il demande explicitement de revérifier l'état courant plutôt que de faire confiance aux SHA ou totaux historiques) ; aucune modification nécessaire.
+
+## Correctif — mise à jour du service worker PWA (corrigé et testé le 18 septembre 2026)
+
+Signalé par l'utilisateur après la fusion de V2.8 : la page Abonnements (livrée dans V2.3, déjà dans le code et la navigation) restait invisible dans son navigateur malgré un déploiement réussi. Cause réelle, sans rapport avec la page elle-même : `scripts/build-offline.mjs` génère `dist/sw.js`, dont les gestionnaires `install`/`activate` n'appelaient ni `self.skipWaiting()` ni `self.clients.claim()`. Sans eux, un nouveau déploiement reste « en attente » indéfiniment et un onglet déjà ouvert (ou l'app installée) continue de servir l'ancien shell tant qu'il n'est pas entièrement fermé puis rouvert — un simple rechargement ne suffit pas. Un utilisateur ayant l'app ouverte avant un lot pouvait donc ne jamais voir ce lot, sans indice sur la raison.
+
+Corrigé par `self.skipWaiting()` à l'installation et `self.clients.claim()` à l'activation. `src/main.tsx` distingue la toute première prise de contrôle (qui suit un chargement normal, donc déjà à jour — ne rien faire) d'un changement de contrôleur alors qu'un contrôleur existait déjà (vraie mise à jour pendant que l'onglet reste ouvert — notifier). Trouvé en testant : une première version sans cette distinction rechargeait aussi à la toute première visite, cassant le test e2e « private vault » (rechargement interrompant un clic de navigation) ; corrigé avant publication.
+
+Relu indépendamment par l'agent `finance-verification` (distinct de l'auteur), qui a reproduit le contrôle négatif lui-même (fichier d'avant le correctif restauré, rebuild, test rejoué, échec confirmé) et trouvé deux défauts réels supplémentaires, corrigés avant publication :
+
+1. **Rechargement silencieux.** Le correctif initial rechargeait l'onglet directement dès qu'une mise à jour était détectée. Or le coffre ne vit qu'en mémoire (`vault.ts` : seule l'enveloppe chiffrée est persistée), donc ce rechargement reverrouillait systématiquement le coffre et perdait toute saisie en cours, sans avertissement — un utilisateur en plein milieu d'une saisie se retrouvait soudainement déconnecté sans explication. Corrigé : `main.tsx` notifie désormais un événement (`finance:update-ready`, `src/swUpdateEvent.ts`, partagé entre les deux fichiers pour éviter toute dérive du nom) au lieu de recharger directement ; `App.tsx` affiche un bandeau persistant (« Une nouvelle version de Finance est disponible. Recharger ») avec un bouton explicite, uniquement dans la vue déverrouillée — seul endroit où reverrouiller un coffre ouvert est un risque réel.
+2. **Risque de collision dans le test e2e.** Le test mutait `dist/sw.js` et `dist/index.html` directement sur disque, partagés avec le serveur `vite preview` utilisé par tous les autres tests — or `playwright.config.ts` a `fullyParallel: true` et 2 workers par défaut (ce que `pnpm run test:e2e` utilise réellement en CI), donc un autre test exécuté en parallèle aurait pu lire ces fichiers pendant la mutation. Corrigé : le test copie désormais `dist/` dans un répertoire temporaire privé et le sert via son propre petit serveur HTTP (`node:http`), isolé de tout autre test quel que soit le nombre de workers.
+
+Preuves : `pnpm run typecheck` (0 erreur), `pnpm run test` (**135/135**, inchangé), `pnpm run build` (réussi), les 9 scénarios `test:e2e` rejoués individuellement, dont le nouveau test dédié avec double contrôle négatif (échoue proprement à ~15s sans `self.skipWaiting()`/`self.clients.claim()`, rejoué manuellement par l'auteur et par le relecteur). Un essai en parallélisme réel (`--workers=2`, configuration par défaut, comme la CI) a été tenté : les échecs observés dans ce bac à sable sont des plantages génériques de Chromium single-process déjà documentés ailleurs dans ce fichier (erreurs dbus/SSL, « browser has been closed »), jamais une collision de contenu — aucune assertion du test PWA n'a échoué sur un contenu inattendu, dans aucun des essais.
+
+À la même occasion : le sous-titre de la page Abonnements (`src/App.tsx`) mentionne désormais « factures » et « charges récurrentes » explicitement. La fonctionnalité (récurrence Nature « Charge », filtre dédié sur la page) couvrait déjà le besoin décrit par l'utilisateur (factures mensuelles toujours identiques + extras occasionnels via Mon mois) ; seule la découvrabilité manquait — confirmé en relisant `Editor.tsx` (option « Charge (loyer, assurance…) ») et le filtre de la page Abonnements, pas seulement supposé.
 
 ## État réel
 
@@ -174,7 +187,7 @@ Le rapprochement des données personnelles reste nécessaire avant d’affirmer 
 | GitHub Pages                                      | Workflow 35317840296 terminé avec succès ; site public ouvert et démonstration affichée.                                                                                            |
 | Validation du skill V2                            | Validateur officiel `quick_validate.py` réussi ; liens locaux et format Prettier contrôlés.                                                                                         |
 | Relecture V2                                      | Forward-test indépendant effectué sur migration, occurrence, mois de règlement, tri multidevise, logos et ordre des lots ; ambiguïtés corrigées avant publication.                  |
-| V2.1 livré                                        | PR #5 (brouillon) vers `main`, dernier commit de `claude/finance-app-completion-k86h7n` ; contrôles locaux détaillés dans la section « Lot V2.1 » ci-dessus.                        |
+| V2.1 livré                                        | PR #5 vers `main`, contrôles locaux détaillés dans la section « Lot V2.1 » ci-dessus.                                                                                                |
 | V2.2 (complet) livré                              | Même PR #5, mêmes contrôles, relu indépendamment ; détail dans la section « Lot V2.2 » ci-dessus.                                                                                   |
 | V2.3 (page Abonnements) livré                     | Même PR #5, mêmes contrôles, relu indépendamment en deux passes ; détail dans la section « Lot V2.3 » ci-dessus.                                                                    |
 | V2.4 (comptes, répartitions et abonnements) livré | Même PR #5, mêmes contrôles, relu indépendamment ; détail dans la section « Lot V2.4 » ci-dessus.                                                                                   |
@@ -184,6 +197,8 @@ Le rapprochement des données personnelles reste nécessaire avant d’affirmer 
 | V2.6 (icônes et monogrammes) livré                | Même PR #5, mêmes contrôles ; détail dans la section « Lot V2.6 » ci-dessus.                                                                                                         |
 | V2.7 (vérification du logo existant) livré        | Même PR #5, mêmes contrôles, relu indépendamment (trois revues : correctif débordement, V2.6, vérification V2.7) ; détail dans la section « Lot V2.7 » ci-dessus.                   |
 | Correctif débordement `.review-item p` livré      | Même PR #5, mêmes contrôles, test e2e dédié avec double contrôle négatif (mot allongé puis `git stash`/rebuild) ; détail dans la section dédiée ci-dessus.                          |
+| V2.8 (livraison finale) livré et fusionné         | PR #5 fusionnée dans `main` (commit `12f1d1d`) ; CI et GitHub Pages verts sur ce commit, site public à jour ; détail dans la section « Lot V2.8 » ci-dessus.                        |
+| Correctif service worker PWA en cours             | Nouvelle branche/PR (la précédente PR #5 est fusionnée, ce correctif est postérieur) ; relu indépendamment avec deux défauts réels trouvés et corrigés ; détail dans la section « Correctif — mise à jour du service worker PWA » ci-dessus. |
 
 Ces preuves n’attestent pas encore l’implémentation de la V2 au-delà de V2.1. Les totaux de tests, SHA et exécutions doivent être relus après chaque nouveau changement. La [revue indépendante](REVUE_INDEPENDANTE.md) décrit les contrôles de l’application initiale et leurs limites.
 
@@ -202,10 +217,11 @@ Toutes les captures utilisent la démonstration fictive. Elles ne prouvent ni Sa
 
 ## Prochaine action
 
-V2.1 à V2.8 sont techniquement livrés sur la PR #5 (modèle des récurrences et migration, statuts/sélecteur de mois/cohorte d’échéances, page Abonnements, comptes/répartitions/tri, correctif `monthSummary`, cartes de comptes compactes, correctif débordement compte/établissement, icônes et monogrammes, vérification du logo existant, correctif débordement `.review-item p`, passe de vérification finale V2.8). Reste à faire :
+V2.1 à V2.8 sont livrés, fusionnés dans `main` (commit `12f1d1d`) et déployés sur le site public. Reste à faire :
 
-1. **Décider de la fusion de la PR #5 vers `main`** — décision distincte de la vérification technique, pas prise automatiquement. Une fois fusionnée, le workflow GitHub Pages met à jour le site public avec le contenu de cette PR ; à recontrôler après fusion (CI sur `main`, site déployé, absence de donnée privée).
+1. **Publier le correctif du service worker PWA** (voir section dédiée ci-dessus) : commité localement sur `claude/finance-app-completion-k86h7n`, relu indépendamment, pas encore poussé/fusionné. À pousser, ouvrir une nouvelle PR (la précédente est fusionnée), vérifier la CI, fusionner puis recontrôler le site public déployé.
+2. Sujet non technique en attente de retour utilisateur : le mot « factures » a été ajouté au sous-titre de la page Abonnements pour la découvrabilité, mais aucune page distincte n'a été créée — à confirmer que cela répond bien au besoin exprimé, ou construire une fonctionnalité dédiée si non.
 
-Chaque lot est terminé avec tests ciblés, parcours navigateur, captures fictives et relecture indépendante vérifiés ; la CI distante et le site publié restent à recontrôler après la fusion.
+Chaque lot est terminé avec tests ciblés, parcours navigateur, captures fictives et relecture indépendante vérifiés ; la CI distante et le site publié sont recontrôlés après chaque fusion.
 
 Lire [DEMARRER_CLAUDE.md](../DEMARRER_CLAUDE.md) pour lancer Claude. Une nouvelle session commence par le dépôt et les accès réels ; elle ne reprend jamais un état historique comme preuve actuelle.
