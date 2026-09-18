@@ -924,6 +924,48 @@ img.brand-mark {
   background: transparent;
   min-width: 44px;
 }
+/* The two rules above still apply as-is to rows that keep .row-value/.button/.icon-button as
+ * *direct* children of .row (the investments list and the documents list).
+ *
+ * transactionRow and subscriptionRow (Mon mois, Accueil "Prochaines échéances" and
+ * Abonnements' "Actifs" list) additionally wrap their value and their action button(s) in
+ * .row-end/.row-actions below. Previously .row-value and the trailing button(s) were each
+ * a *separate* flex child of .row: at phone width neither fit next to row-main, so each
+ * wrapped onto its own full-width line — with exactly the same 12px gap used between every
+ * other pair of row elements, nothing set the amount-and-its-button apart from the row's
+ * header, so the row read as three unrelated floating chunks instead of one. .row-end
+ * groups them into a single flex item that wraps as one, and its own tighter internal gap
+ * (below) gives that pair a visibly closer relationship than the gap separating them from
+ * the row's header (icon + title). Nesting the icon-buttons one level deeper also takes them
+ * out of `.row > .icon-button` above (a *direct*-child selector), which is how they got their
+ * transparent/borderless look inside a row; .row-actions .icon-button below reapplies it so
+ * an icon-only action (attach, revert, edit) still blends into the row instead of picking up
+ * the bordered/filled look of a standalone .icon-button (independently confirmed via a fresh
+ * repro: computed border/background differed from the still-untouched positions-list case
+ * before this rule was added). */
+.row-end {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px 12px;
+  margin-left: auto;
+  flex-shrink: 0;
+  max-width: 100%;
+}
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.row-actions .button {
+  flex-shrink: 0;
+}
+.row-actions .icon-button {
+  border-color: transparent;
+  background: transparent;
+}
 .positive {
   color: var(--positive);
 }
