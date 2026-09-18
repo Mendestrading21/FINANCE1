@@ -841,3 +841,77 @@ test("accounts: an unbroken long institution name wraps instead of overflowing t
   ).toBe(true);
   expect(errors).toEqual([]);
 });
+
+// Regression: same class of bug as the account/institution one above, in a different element.
+// .review-item p (Documents et réglages, carte "Informations à vérifier") had no overflow-wrap,
+// unlike .review-item h3 (now covered by the generic h1/h2/h3 rule). A ReviewItem's `reason` is
+// free imported text (up to 8000 characters, src/domain/validation.ts) and can contain a single
+// unbroken long word. Unlike the account grid (three narrow columns), this card is full width
+// on its own line at desktop width, so a single ~80-character word still fits without wrapping —
+// it takes a much longer unbroken run (a plausible worst case for pasted/malformed import text)
+// to actually push past the container and overflow the page.
+test("review items: an unbroken long reason from an import wraps instead of overflowing the page", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/");
+  await page
+    .getByLabel("Phrase secrète", { exact: true })
+    .fill("Exemple-test-Finance-review-debordement-2026");
+  await page
+    .getByLabel("Confirmer la phrase secrète")
+    .fill("Exemple-test-Finance-review-debordement-2026");
+  await page.getByRole("button", { name: "Créer mon coffre" }).click();
+
+  const longWord =
+    "Informationimporteesansespacequidoitpasfairedeborderlapagecarcestunmottresslong".repeat(
+      4,
+    );
+  const payload = JSON.stringify({
+    version: 2,
+    accounts: [],
+    transactions: [],
+    recurrences: [],
+    goals: [],
+    positions: [],
+    documents: [],
+    fxRates: [],
+    reviewItems: [
+      {
+        id: "review-long-reason",
+        title: "Élément à vérifier",
+        reason: longWord,
+        source: { system: "import" },
+      },
+    ],
+    preferences: { baseCurrency: "CHF", locale: "fr-CH" },
+  });
+  await page
+    .getByRole("navigation", { name: "Navigation principale", exact: true })
+    .getByRole("button", { name: "Documents et réglages", exact: true })
+    .click();
+  await page
+    .locator('input[type="file"][accept=".json,.csv"]')
+    .setInputFiles({
+      name: "import-fictif.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(payload),
+    });
+  await expect(
+    page.getByText("Vérifier cet import", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Confirmer l’import", exact: true })
+    .click();
+  await expect(
+    page.getByText("Vérifier cet import", { exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByText(longWord, { exact: false })).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  expect(errors).toEqual([]);
+});

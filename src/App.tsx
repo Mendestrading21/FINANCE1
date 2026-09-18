@@ -99,7 +99,7 @@ function monogramInitials(name: string): string {
 const MONOGRAM_PALETTE = [
   { bg: "rgba(138, 169, 255, 0.16)", fg: "#8aa9ff" },
   { bg: "rgba(170, 150, 255, 0.16)", fg: "#aa96ff" },
-  { bg: "rgba(122, 196, 222, 0.16)", fg: "#7ac4de" },
+  { bg: "rgba(111, 151, 224, 0.16)", fg: "#6f97e0" },
   { bg: "rgba(124, 140, 255, 0.16)", fg: "#7c8cff" },
   { bg: "rgba(200, 150, 230, 0.16)", fg: "#c896e6" },
   { bg: "rgba(160, 180, 200, 0.16)", fg: "#c0ceef" },
