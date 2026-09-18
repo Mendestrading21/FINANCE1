@@ -729,9 +729,9 @@ img.brand-mark {
 .account-card {
   min-width: 0;
   position: relative;
-  padding: 24px;
+  padding: 18px;
   border: 1px solid #2a2e40;
-  border-radius: 22px;
+  border-radius: 20px;
   background:
     radial-gradient(
       ellipse at 90% 0%,
@@ -760,7 +760,7 @@ img.brand-mark {
   align-items: start;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 31px;
+  margin-bottom: 14px;
 }
 .institution {
   display: flex;
@@ -789,7 +789,7 @@ img.brand-mark {
   font-size: 30px;
   letter-spacing: -0.045em;
   font-weight: 550;
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   overflow-wrap: anywhere;
 }
 .balance small {
@@ -803,6 +803,12 @@ img.brand-mark {
   font-size: 12px;
   color: var(--muted);
   line-height: 1.65;
+}
+.account-card .meta {
+  margin-bottom: 6px;
+}
+.account-card .hero-foot {
+  margin-top: 8px;
 }
 .tag {
   display: inline-flex;
@@ -818,8 +824,8 @@ img.brand-mark {
   line-height: 1.5;
 }
 .account-history {
-  margin-top: 18px;
-  padding-top: 15px;
+  margin-top: 10px;
+  padding-top: 8px;
   border-top: 1px solid var(--line-soft);
 }
 .account-history summary {
@@ -1802,10 +1808,10 @@ input::file-selector-button {
     gap: 15px;
   }
   .account-card {
-    padding: 22px;
+    padding: 16px;
   }
   .account-head {
-    margin-bottom: 25px;
+    margin-bottom: 12px;
   }
   .balance {
     font-size: 30px;
