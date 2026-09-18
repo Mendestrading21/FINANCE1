@@ -258,9 +258,7 @@ test("daily entries: income, currency-synced transfer, recurrence, investment-on
   await dialog
     .getByLabel("Compte", { exact: true })
     .selectOption({ label: "Compte principal test · CHF" });
-  await dialog
-    .getByLabel("État", { exact: true })
-    .selectOption({ label: "Payé / reçu, confirmé" });
+  await dialog.getByLabel("État", { exact: true }).selectOption({ label: "Reçu" });
   await dialog
     .getByRole("button", { name: "Enregistrer", exact: true })
     .click();
@@ -316,6 +314,10 @@ test("daily entries: income, currency-synced transfer, recurrence, investment-on
   );
   await dialog.getByLabel("Catégorie", { exact: true }).fill("Assurances");
   await dialog.getByLabel("Jour du mois", { exact: true }).fill("15");
+  // A start date safely before this month's day 15 guarantees this month's occurrence
+  // exists regardless of which day "today" actually is when the suite runs (defaulting
+  // to today would often push the start past the 15th and skip this month entirely).
+  await dialog.getByLabel("Début", { exact: true }).fill("2026-01-01");
   await dialog
     .getByRole("button", { name: "Enregistrer", exact: true })
     .click();
@@ -333,6 +335,38 @@ test("daily entries: income, currency-synced transfer, recurrence, investment-on
   );
   await dialog.getByRole("button", { name: "Fermer" }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
+
+  // 2bis) Statuts explicites : "Marquer payé" ouvre l'éditeur avec la date de règlement
+  // visible et modifiable (pas d'écriture silencieuse), "Remettre à payer" revient en
+  // arrière sans effacer la trace du règlement précédent.
+  const occurrenceRow = page
+    .locator(".row", { hasText: "Assurance test" })
+    .filter({ hasNotText: "tous les" });
+  await expect(occurrenceRow).toContainText("Pas encore payé");
+  await occurrenceRow
+    .getByRole("button", { name: "Marquer payé", exact: true })
+    .click();
+  dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("Libellé", { exact: true })).toHaveValue(
+    "Assurance test",
+  );
+  await expect(dialog.getByLabel("État", { exact: true })).toHaveValue(
+    "settled",
+  );
+  await expect(
+    dialog.getByLabel("Date de l’opération ou échéance", { exact: true }),
+  ).not.toHaveValue("");
+  await dialog
+    .getByRole("button", { name: "Enregistrer", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(occurrenceRow).toContainText("Payé");
+  await expect(occurrenceRow).not.toContainText("Pas encore payé");
+  page.once("dialog", (d) => d.accept());
+  await occurrenceRow
+    .getByRole("button", { name: "Remettre à payer Assurance test", exact: true })
+    .click();
+  await expect(occurrenceRow).toContainText("Pas encore payé");
 
   // 3) Transfer between two accounts of different currencies: source account is required,
   // currency is deduced from it, and the destination amount is required across currencies.

@@ -11,6 +11,7 @@ import {
   type FinanceData,
   type Recurrence,
   type Source,
+  type Transaction,
 } from "../domain/types";
 import { parseMoney, today, withRecurrenceAmount } from "../domain/finance";
 import { Icon } from "./Icon";
@@ -36,6 +37,11 @@ export type EditorSpec = {
     | "fx";
   id?: string;
   kind?: "income" | "expense" | "transfer";
+  /** Prefills a transaction editor from a not-yet-persisted occurrence (a virtual planned
+   * projection from `transactionsForMonth`, not yet in `data.transactions`) instead of the
+   * usual lookup by `id`. Used to open "Marquer payé/reçu" with the settlement date visible
+   * and editable before it is actually saved, rather than writing it silently on click. */
+  transaction?: Transaction;
 };
 const titles = {
   transaction: "Une opération",
@@ -84,7 +90,7 @@ export default function Editor({
     recurrenceKind === "income" ? "income" : expenseRecurrenceType;
   const item =
     spec.type === "transaction"
-      ? data.transactions.find((i) => i.id === spec.id)
+      ? (data.transactions.find((i) => i.id === spec.id) ?? spec.transaction)
       : spec.type === "account" || spec.type === "balance"
         ? data.accounts.find((i) => i.id === spec.id)
         : spec.type === "goal"
@@ -479,8 +485,20 @@ export default function Editor({
                 defaultValue: val("status", "planned"),
                 children: (
                   <>
-                    <option value="planned">Prévu</option>
-                    <option value="settled">Payé / reçu, confirmé</option>
+                    <option value="planned">
+                      {kind === "income"
+                        ? "Pas encore reçu"
+                        : kind === "expense"
+                          ? "Pas encore payé"
+                          : "Prévu"}
+                    </option>
+                    <option value="settled">
+                      {kind === "income"
+                        ? "Reçu"
+                        : kind === "expense"
+                          ? "Payé"
+                          : "Réglé"}
+                    </option>
                     <option value="unknown">À vérifier</option>
                   </>
                 ),

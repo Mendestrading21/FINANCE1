@@ -685,24 +685,70 @@ export default function App() {
       </article>
     );
   }
-  async function settle(t: Transaction) {
+  /** "Prévu" never distinguished a due expense from a due income, and gave no explicit
+   * word for the not-yet state — see docs/AUDIT_UI_V2.md. */
+  function statusWord(t: Transaction): string {
+    if (t.status === "unknown") return "À vérifier";
+    if (t.status === "settled")
+      return t.kind === "income" ? "Reçu" : t.kind === "transfer" ? "Réglé" : "Payé";
+    return t.kind === "income"
+      ? "Pas encore reçu"
+      : t.kind === "transfer"
+        ? "Prévu"
+        : "Pas encore payé";
+  }
+  // Opens the editor pre-filled to settled/today rather than writing it on click: the
+  // settlement date must stay "visible et modifiable avant validation" (see
+  // .claude/skills/finance/references/abonnements.md), not silently forced to today.
+  // `transaction` prefills the form even for a not-yet-persisted virtual occurrence,
+  // which has no entry in data.transactions for the usual by-id lookup to find.
+  function markSettled(t: Transaction) {
+    edit({
+      type: "transaction",
+      id: t.id,
+      kind: t.kind,
+      transaction: { ...t, status: "settled", date: today() },
+    });
+  }
+  // Limited to recurrence-linked occurrences: occurrenceDate is then a reliable due date
+  // to fall back to (see field comment on EditorSpec.transaction). A plain one-off
+  // transaction can still be corrected by hand through the pencil/edit action, which
+  // already exposes État as a free choice.
+  async function revertToPlanned(t: Transaction) {
     if (!data) return;
+    const verb =
+      t.kind === "income" ? "recevoir" : t.kind === "transfer" ? "régler" : "payer";
+    if (
+      !window.confirm(
+        `Remettre « ${t.label} » à ${verb} ? Le règlement du ${t.date ?? "date inconnue"} reste conservé dans l’historique, pas effacé.`,
+      )
+    )
+      return;
     try {
-      const next = {
+      const next: Transaction = {
         ...t,
-        status: "settled" as const,
-        date: today(),
-        source: { ...t.source, updatedAt: new Date().toISOString() },
+        status: "planned",
+        date: t.occurrenceDate ?? t.date,
+        source: {
+          ...t.source,
+          updatedAt: new Date().toISOString(),
+          note: [
+            t.source.note,
+            `Remis à prévu le ${new Date().toISOString()} (réglé précédemment le ${t.date ?? "date inconnue"}).`,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+        },
       };
       await persist({
         ...data,
         transactions: [...data.transactions.filter((v) => v.id !== t.id), next],
       });
       setMessage(
-        "Paiement confirmé. Actualisez le solde du compte après rapprochement.",
+        "Remis à prévu. L’ancienne date de règlement reste dans l’historique.",
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Paiement non enregistré.");
+      setError(e instanceof Error ? e.message : "Correction non enregistrée.");
     }
   }
   function transactionRow(t: Transaction) {
@@ -728,12 +774,7 @@ export default function App() {
               (t.budgetMonth
                 ? monthLabel(t.budgetMonth) + " · jour à vérifier"
                 : "Date à vérifier")}{" "}
-            · {accountName(t.accountId)} ·{" "}
-            {t.status === "settled"
-              ? "Confirmé"
-              : t.status === "planned"
-                ? "Prévu"
-                : "À vérifier"}
+            · {accountName(t.accountId)} · {statusWord(t)}
             {data?.documents.some((d) => d.transactionId === t.id) &&
               " · Justificatif joint"}
           </span>
@@ -743,22 +784,25 @@ export default function App() {
           {display(t.amountMinor, t.currency)}
         </span>
         {t.status === "planned" ? (
-          <button
-            className="icon-button"
-            title="Confirmer le paiement aujourd’hui"
-            aria-label={`Confirmer ${t.label}`}
-            onClick={() => settle(t)}
-          >
-            <Icon name="check" size={17} />
+          <button className="button small secondary" onClick={() => markSettled(t)}>
+            <Icon name="check" size={16} />
+            {t.kind === "income"
+              ? "Marquer reçu"
+              : t.kind === "transfer"
+                ? "Marquer réglé"
+                : "Marquer payé"}
           </button>
         ) : null}
         {data?.transactions.some((i) => i.id === t.id) && (
           <>
             {
-              // Kept exclusive with the "confirmer" action above so a row never carries
-              // three icon buttons at once (crowds the label on an iPhone width). A
-              // receipt is also most often at hand once the operation is settled; a
-              // planned operation can still be reached from Documents et réglages.
+              // Kept exclusive with the "marquer" action above so a planned row never
+              // crowds two actions (the label wraps on an iPhone width). A receipt is
+              // also most often at hand once the operation is settled; a planned
+              // operation can still be reached from Documents et réglages. The
+              // correction action below adds a third icon-button only for the narrower
+              // recurrence-linked case — accepted for now, to revisit with the row
+              // density rework of V2.5.
               t.status !== "planned" && (
                 <label
                   className="icon-button"
@@ -774,6 +818,22 @@ export default function App() {
                 </label>
               )
             }
+            {t.status === "settled" && t.recurrenceId && t.occurrenceDate && (
+              <button
+                className="icon-button"
+                title="Corriger : remettre à prévu"
+                aria-label={`${
+                  t.kind === "income"
+                    ? "Remettre à recevoir"
+                    : t.kind === "transfer"
+                      ? "Remettre à régler"
+                      : "Remettre à payer"
+                } ${t.label}`}
+                onClick={() => revertToPlanned(t)}
+              >
+                <Icon name="refresh" size={17} />
+              </button>
+            )}
             <button
               className="icon-button"
               aria-label={`Modifier ${t.label}`}
