@@ -1,6 +1,6 @@
 # Finance — état de reprise
 
-Mise à jour : 18 septembre 2026 (lots V2.1, V2.2-statuts et V2.4-tri livrés). Ce fichier décrit les faits vérifiés. Le plan V2 décrit le travail suivant ; il ne constitue pas une preuve que ces améliorations sont déjà dans l’application au-delà de ce qui est explicitement marqué développé/testé ci-dessous.
+Mise à jour : 18 septembre 2026 (lots V2.1, V2.2 statuts+mois et V2.4 tri livrés). Ce fichier décrit les faits vérifiés. Le plan V2 décrit le travail suivant ; il ne constitue pas une preuve que ces améliorations sont déjà dans l’application au-delà de ce qui est explicitement marqué développé/testé ci-dessous.
 
 ## Lot V2.1 — Modèle récurrent (développé et testé le 18 septembre 2026)
 
@@ -19,9 +19,9 @@ Preuves (recomptées après les deux corrections) : `pnpm run typecheck` (0 erre
 
 **Toujours prévu, non développé :** V2.2 (mois lisibles, statuts payé/reçu, cohorte d’échéances vs flux réalisé), V2.3 (page Abonnements), V2.4–V2.8 (tri partagé, cartes compactes, icônes/établissements, logo, livraison finale). Aucune capture dédiée à ce lot : le champ « Nature » n’a pas modifié les captures existantes (tableau de bord, projets) au-delà d’un nouveau rendu du même jeu de données fictif.
 
-## Lot V2.2 (volet statuts uniquement) — développé et testé le 18 septembre 2026
+## Lot V2.2 (statuts et sélecteur de mois) — développé et testé le 18 septembre 2026
 
-Seul le volet « statuts payé/reçu explicites » du lot V2.2 est traité ici. **Le sélecteur de mois français (Janvier–Décembre) et la distinction cohorte d’échéances / flux réalisé restent entièrement prévus, non développés.**
+Les volets « statuts payé/reçu explicites » et « sélecteur de mois français » du lot V2.2 sont traités ici. **La distinction cohorte d’échéances / flux réalisé reste prévue, non développée** (aucun fichier `src/domain/finance.ts` n’y touche encore).
 
 Le bouton icône générique « Confirmer » est remplacé par une action texte sensible au type (« Marquer payé »/« Marquer reçu »/« Marquer réglé ») qui ouvre l’éditeur pré-rempli à `settled`/aujourd’hui au lieu d’écrire silencieusement au clic : la date de règlement reste visible et modifiable avant validation (`EditorSpec.transaction` préremplit le formulaire même pour une occurrence virtuelle pas encore persistée). Une correction « Remettre à payer/recevoir/régler », limitée aux occurrences liées à une récurrence, repasse le statut à prévu, restaure la date d’échéance et consigne l’ancienne date de règlement dans `source.note` au lieu de l’effacer (confirmation explicite requise ; identifiant de transaction inchangé, un reçu déjà joint reste lié). Les libellés « Payé »/« Reçu »/« Pas encore payé »/« Pas encore reçu » remplacent « Confirmé »/« Prévu » dans les lignes d’opération et le champ État de l’éditeur.
 
@@ -31,6 +31,14 @@ Relu indépendamment par l’agent `finance-verification` **avant tout push** (m
 2. `index.css` : le nouveau bouton texte, plus large que l’ancienne icône seule, faisait s’effondrer `.row-main` à 390 px (une lettre par ligne, hauteur de page passée de 3711 px à 5602 px sur l’Accueil) car `min-width:0` empêchait tout déclenchement de retour à la ligne. Corrigé par un plancher de largeur sur `.row-main` et `flex-wrap` sur `.row` ; confirmé par inspection visuelle réelle des captures régénérées (390/834/1440 px, Accueil et Mon mois) — l’assertion automatisée `scrollWidth` existante ne détectait pas ce défaut (débordement vertical, pas horizontal).
 
 Preuves : `pnpm run typecheck` (0 erreur), `pnpm run test` (**93/93**, inchangé — ce lot est uniquement UI), `pnpm run build` (réussi), les 4 scénarios `test:e2e` rejoués individuellement, dont le nouveau scénario couvrant le cycle marquer payé → remettre à payer → marquer payé de nouveau (occurrence de récurrence et opération ponctuelle). Captures 390/834/1440 px inspectées visuellement après correction, pas seulement testées automatiquement.
+
+### Sélecteur de mois français
+
+Remplace l’ancien `<input type="month">` par `src/components/MonthPicker.tsx` : rangée compacte Janvier–Décembre, année dans un contrôle séparé (précédent/suivant), mois sélectionné mis en évidence, raccourci « Ce mois-ci » affiché seulement en dehors du mois courant. La valeur canonique `YYYY-MM` reste dans l’état existant (`month`/`setMonth`) ; le nom français n’est qu’une présentation, sans calendrier journalier. Libellés courts explicites (Jan/Fév/Mar/Avr/Mai/Jun/Jul/Aoû/Sep/Oct/Nov/Déc), pas un `slice(0,3)` naïf qui aurait rendu Juin et Juillet indiscernables (tous deux « Jui ») ; le nom complet reste le nom accessible (`aria-label`) de chaque bouton. La rangée défile sur les écrans étroits plutôt que de déborder ou de passer à la ligne (correctif `min-width:0` requis sur l’élément flex imbriqué, sans quoi rien ne le forçait à respecter la largeur disponible — détecté par l’assertion `scrollWidth` déjà présente dans le test de captures, confirmé par capture réelle) ; le mois actif se recentre automatiquement au montage et à chaque redimensionnement.
+
+Relu indépendamment par l’agent `finance-verification` (distinct de l’auteur), en conditions réelles : navigation clavier (Tab, Espace, Entrée, focus visible confirmé par `getComputedStyle`), mise à jour réelle des données dépendantes sur un coffre de démonstration (Décembre vide les opérations datées mais conserve l’occurrence récurrente), frontière décembre↔janvier par clic direct sur les mois (pas seulement les boutons année), recentrage après redimensionnement simulé, rechargement/déverrouillage. A aussi étendu la couverture de débordement à 390 px aux pages non capturées par le test officiel (Mon mois, Mes comptes, Investissements, Documents et réglages, Épargne et projets), un trou de couverture préexistant du test qu’elle a signalé sans le corriger elle-même. Un défaut réel non bloquant trouvé et corrigé : la rangée de mois (`<div aria-label="Choisir un mois">`) n’avait pas de rôle ARIA explicite, donc son nom accessible était silencieusement ignoré (rôle implicite `generic`) ; corrigé par `role="group"`, avec test de régression dédié.
+
+Preuves : `pnpm run typecheck` (0 erreur), `pnpm run test` (**101/101**, inchangé — aucune fonction de domaine modifiée), `pnpm run build` (réussi), `pnpm audit --audit-level high` (aucune vulnérabilité), les 5 scénarios `test:e2e` rejoués individuellement (dont le nouveau test dédié au sélecteur de mois). Captures 390/834/1440 px inspectées visuellement, y compris la page Épargne et projets.
 
 ## Lot V2.4 (comptes et répartitions) — développé et testé le 18 septembre 2026
 
@@ -42,8 +50,6 @@ Relu indépendamment par l’agent `finance-verification` (distinct de l’auteu
 
 Preuves : `pnpm run typecheck` (0 erreur), `pnpm run test` (**101/101**, 8 nouveaux tests sur le tri : ordre décroissant, dette, absence de taux commun, zéro, composantes incomplètes, égalités, non-normalisation annuel/mensuel, élément valorisé mais non daté ; aucune fonction de domaine modifiée par le câblage lui-même), `pnpm run build` (réussi), les 4 scénarios `test:e2e` rejoués individuellement. Captures 390/834/1440 px inspectées visuellement après chaque changement, pas seulement testées automatiquement.
 
-Preuves : `pnpm run typecheck` (0 erreur), `pnpm run test` (**101/101**, 8 nouveaux tests : ordre décroissant, dette, absence de taux commun, zéro, composantes incomplètes, égalités, non-normalisation annuel/mensuel, élément valorisé mais non daté), `pnpm run build` (réussi). Travail disjoint des fichiers du lot V2.2 (`finance.ts`/`finance.test.ts` seulement), commité séparément.
-
 ## État réel
 
 | Élément                           | État                                                          | Résultat et limite                                                                                                                                                                                                                            |
@@ -52,7 +58,7 @@ Preuves : `pnpm run typecheck` (0 erreur), `pnpm run test` (**101/101**, 8 nouve
 | Audit Notion                      | Terminé pour les sources accessibles lors de l’import initial | Budgets, comptes, factures, revenus, abonnements et espace Trading ont été rapprochés. Les données et ambiguïtés privées restent hors Git.                                                                                                    |
 | Modèle, calculs et coffre         | Développés et testés sur la version actuelle                  | Montants exacts, inconnus explicites, dates distinctes, transferts neutres, coffre chiffré local, sauvegarde et restauration. Pas de serveur ni de synchronisation automatique entre appareils.                                               |
 | Application actuelle              | Livrée : six pages                                            | Vue d’ensemble, Mon mois, Mes comptes, Épargne et projets, Investissements, Documents et réglages. La page Abonnements et les nouveaux états mensuels sont encore **prévus**.                                                                 |
-| Amélioration V2                   | V2.1 et V2.4 (comptes/répartitions) développés et testés ; V2.2 partiel ; reste spécifié, non développé | V2.1, le volet statuts de V2.2 et V2.4 (comptes et répartitions) livrés, voir ci-dessus. Mois lisibles, cohorte d’échéances/flux réalisé, tri des abonnements (dépend de V2.3), page Abonnements, densité, icônes, établissements et nouveau logo restent **prévus**. |
+| Amélioration V2                   | V2.1 et V2.4 (comptes/répartitions) développés et testés ; V2.2 presque complet ; reste spécifié, non développé | V2.1, les volets statuts et sélecteur de mois de V2.2, et V2.4 (comptes et répartitions) livrés, voir ci-dessus. Cohorte d’échéances/flux réalisé (dernier volet de V2.2), tri des abonnements (dépend de V2.3), page Abonnements, densité, icônes, établissements et nouveau logo restent **prévus**. |
 | Skill et agents                   | Livrés                                                        | Skill maître Finance, huit références et onze missions spécialisées, dont Abonnements et Identité visuelle.                                                                                                                                   |
 | Publication GitHub                | Livrée                                                        | Branche `main` du dépôt public `Mendestrading21/Finances`. Toute nouvelle modification doit revérifier le HEAD, la CI et l’absence de données privées.                                                                                        |
 | GitHub Pages                      | Livré et vérifié                                              | Site public disponible sur `https://mendestrading21.github.io/Finances/`. Le workflow Pages accepte les publications de `main` et un lancement manuel.                                                                                        |
@@ -77,7 +83,7 @@ Le rapprochement des données personnelles reste nécessaire avant d’affirmer 
 | Validation du skill V2 | Validateur officiel `quick_validate.py` réussi ; liens locaux et format Prettier contrôlés.                                                                        |
 | Relecture V2           | Forward-test indépendant effectué sur migration, occurrence, mois de règlement, tri multidevise, logos et ordre des lots ; ambiguïtés corrigées avant publication. |
 | V2.1 livré             | PR #5 (brouillon) vers `main`, dernier commit de `claude/finance-app-completion-k86h7n` ; contrôles locaux détaillés dans la section « Lot V2.1 » ci-dessus. |
-| V2.2 (statuts) livré   | Même PR #5, mêmes contrôles ; détail dans la section « Lot V2.2 » ci-dessus. |
+| V2.2 (statuts + sélecteur de mois) livré | Même PR #5, mêmes contrôles, relu indépendamment ; détail dans la section « Lot V2.2 » ci-dessus. |
 | V2.4 (comptes et répartitions) livré | Même PR #5, mêmes contrôles, relu indépendamment ; détail dans la section « Lot V2.4 » ci-dessus. |
 
 Ces preuves n’attestent pas encore l’implémentation de la V2 au-delà de V2.1. Les totaux de tests, SHA et exécutions doivent être relus après chaque nouveau changement. La [revue indépendante](REVUE_INDEPENDANTE.md) décrit les contrôles de l’application initiale et leurs limites.
@@ -97,9 +103,9 @@ Toutes les captures utilisent la démonstration fictive. Elles ne prouvent ni Sa
 
 ## Prochaine action
 
-V2.1 (modèle des récurrences et migration), le volet statuts de V2.2 et V2.4 (comptes et répartitions) sont livrés. Reste à faire, dans l’ordre du plan :
+V2.1 (modèle des récurrences et migration), les volets statuts et sélecteur de mois de V2.2, et V2.4 (comptes et répartitions) sont livrés. Reste à faire, dans l’ordre du plan :
 
-1. **Finir V2.2** : sélecteur de mois en français (Janvier–Décembre, année séparée), puis la distinction cohorte d’échéances / flux réalisé dans le moteur (`src/domain/finance.ts`).
+1. **Finir V2.2** : la distinction cohorte d’échéances / flux réalisé dans le moteur (`src/domain/finance.ts`) — dernier volet du lot.
 2. **V2.3 — page Abonnements**, une fois V2.2 complet ; y câbler alors le tri des abonnements (dernier élément de V2.4, qui en dépend).
 3. V2.5–V2.8 (densité, icônes/établissements, logo, livraison finale).
 

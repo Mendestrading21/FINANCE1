@@ -645,6 +645,11 @@ test("month picker: French Janvier–Décembre row, year navigation, Ce mois-ci 
   await expect(page.getByText(String(currentYear), { exact: true })).toBeVisible();
   // The current month is selected by default: no "back to this month" shortcut needed yet.
   await expect(page.getByRole("button", { name: "Ce mois-ci" })).toHaveCount(0);
+  // A plain <div> with just aria-label has no accessible name (generic role strips it) —
+  // role="group" is what actually exposes "Choisir un mois" to assistive tech.
+  await expect(
+    page.getByRole("group", { name: "Choisir un mois", exact: true }),
+  ).toBeVisible();
 
   // Distinct, disambiguated short labels: a naive slice(0, 3) would show "Jui" for both.
   await expect(

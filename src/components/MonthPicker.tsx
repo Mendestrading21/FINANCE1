@@ -70,7 +70,7 @@ export function MonthPicker({
           <Icon name="chevron-right" size={16} />
         </button>
       </div>
-      <div className="month-row" aria-label="Choisir un mois">
+      <div className="month-row" role="group" aria-label="Choisir un mois">
         {MONTHS.map(({ name, short }, index) => {
           const value = withMonth(index + 1);
           return (
