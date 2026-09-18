@@ -947,72 +947,76 @@ export default function App() {
               " · Justificatif joint"}
           </span>
         </div>
-        <span className={`row-value ${t.kind === "income" ? "positive" : ""}`}>
-          {t.kind === "income" ? "+" : ""}
-          {display(t.amountMinor, t.currency)}
-        </span>
-        {t.status === "planned" ? (
-          <button className="button small secondary" onClick={() => markSettled(t)}>
-            <Icon name="check" size={16} />
-            {t.kind === "income"
-              ? "Marquer reçu"
-              : t.kind === "transfer"
-                ? "Marquer réglé"
-                : "Marquer payé"}
-          </button>
-        ) : null}
-        {data?.transactions.some((i) => i.id === t.id) && (
-          <>
-            {
-              // Kept exclusive with the "marquer" action above so a planned row never
-              // crowds two actions (the label wraps on an iPhone width). A receipt is
-              // also most often at hand once the operation is settled; a planned
-              // operation can still be reached from Documents et réglages. The
-              // correction action below adds a third icon-button only for the narrower
-              // recurrence-linked case — accepted for now, to revisit with the row
-              // density rework of V2.5.
-              t.status !== "planned" && (
-                <label
-                  className="icon-button"
-                  aria-label={`Joindre un document à ${t.label}`}
-                >
-                  <Icon name="document" size={17} />
-                  <input
-                    className="sr-only"
-                    type="file"
-                    accept="application/pdf,image/jpeg,image/png,image/webp"
-                    onChange={(e) => attach(e, t.id)}
-                  />
-                </label>
-              )
-            }
-            {t.status === "settled" && t.recurrenceId && t.occurrenceDate && (
-              <button
-                className="icon-button"
-                title="Corriger : remettre à prévu"
-                aria-label={`${
-                  t.kind === "income"
-                    ? "Remettre à recevoir"
-                    : t.kind === "transfer"
-                      ? "Remettre à régler"
-                      : "Remettre à payer"
-                } ${t.label}`}
-                onClick={() => revertToPlanned(t)}
-              >
-                <Icon name="refresh" size={17} />
+        <div className="row-end">
+          <span className={`row-value ${t.kind === "income" ? "positive" : ""}`}>
+            {t.kind === "income" ? "+" : ""}
+            {display(t.amountMinor, t.currency)}
+          </span>
+          <div className="row-actions">
+            {t.status === "planned" ? (
+              <button className="button small secondary" onClick={() => markSettled(t)}>
+                <Icon name="check" size={16} />
+                {t.kind === "income"
+                  ? "Marquer reçu"
+                  : t.kind === "transfer"
+                    ? "Marquer réglé"
+                    : "Marquer payé"}
               </button>
+            ) : null}
+            {data?.transactions.some((i) => i.id === t.id) && (
+              <>
+                {
+                  // Kept exclusive with the "marquer" action above so a planned row never
+                  // crowds two actions (the label wraps on an iPhone width). A receipt is
+                  // also most often at hand once the operation is settled; a planned
+                  // operation can still be reached from Documents et réglages. The
+                  // correction action below adds a third icon-button only for the narrower
+                  // recurrence-linked case — accepted for now, to revisit with the row
+                  // density rework of V2.5.
+                  t.status !== "planned" && (
+                    <label
+                      className="icon-button"
+                      aria-label={`Joindre un document à ${t.label}`}
+                    >
+                      <Icon name="document" size={17} />
+                      <input
+                        className="sr-only"
+                        type="file"
+                        accept="application/pdf,image/jpeg,image/png,image/webp"
+                        onChange={(e) => attach(e, t.id)}
+                      />
+                    </label>
+                  )
+                }
+                {t.status === "settled" && t.recurrenceId && t.occurrenceDate && (
+                  <button
+                    className="icon-button"
+                    title="Corriger : remettre à prévu"
+                    aria-label={`${
+                      t.kind === "income"
+                        ? "Remettre à recevoir"
+                        : t.kind === "transfer"
+                          ? "Remettre à régler"
+                          : "Remettre à payer"
+                    } ${t.label}`}
+                    onClick={() => revertToPlanned(t)}
+                  >
+                    <Icon name="refresh" size={17} />
+                  </button>
+                )}
+                <button
+                  className="icon-button"
+                  aria-label={`Modifier ${t.label}`}
+                  onClick={() =>
+                    edit({ type: "transaction", id: t.id, kind: t.kind })
+                  }
+                >
+                  <Icon name="edit" size={17} />
+                </button>
+              </>
             )}
-            <button
-              className="icon-button"
-              aria-label={`Modifier ${t.label}`}
-              onClick={() =>
-                edit({ type: "transaction", id: t.id, kind: t.kind })
-              }
-            >
-              <Icon name="edit" size={17} />
-            </button>
-          </>
-        )}
+          </div>
+        </div>
       </div>
     );
   }
@@ -1061,46 +1065,50 @@ export default function App() {
                 : "Aucune échéance ce mois-ci"}
           </span>
         </div>
-        <div className="row-value">
-          {nextDate ? (
-            <>
-              {display(nextAmount, r.currency)}
-              <span className="row-detail">Prochaine échéance : {nextDate}</span>
-              {monthlyEquiv !== null && (
-                <span className="row-detail">
-                  ≈ {display(monthlyEquiv, r.currency)}/mois
-                </span>
-              )}
-            </>
-          ) : (
-            <span className="row-detail">Aucune échéance à venir</span>
-          )}
+        <div className="row-end">
+          <div className="row-value">
+            {nextDate ? (
+              <>
+                {display(nextAmount, r.currency)}
+                <span className="row-detail">Prochaine échéance : {nextDate}</span>
+                {monthlyEquiv !== null && (
+                  <span className="row-detail">
+                    ≈ {display(monthlyEquiv, r.currency)}/mois
+                  </span>
+                )}
+              </>
+            ) : (
+              <span className="row-detail">Aucune échéance à venir</span>
+            )}
+          </div>
+          <div className="row-actions">
+            {dueTxn && (
+              <button className="button small secondary" onClick={() => markSettled(dueTxn)}>
+                <Icon name="check" size={16} />
+                {r.kind === "income" ? "Marquer reçu" : "Marquer payé"}
+              </button>
+            )}
+            {settledTxn && (
+              <button
+                className="icon-button"
+                title="Corriger : remettre à prévu"
+                aria-label={`${
+                  r.kind === "income" ? "Remettre à recevoir" : "Remettre à payer"
+                } ${r.label}`}
+                onClick={() => revertToPlanned(settledTxn)}
+              >
+                <Icon name="refresh" size={17} />
+              </button>
+            )}
+            <button
+              className="icon-button"
+              aria-label={`Modifier ${r.label}`}
+              onClick={() => edit({ type: "recurrence", id: r.id })}
+            >
+              <Icon name="edit" size={17} />
+            </button>
+          </div>
         </div>
-        {dueTxn && (
-          <button className="button small secondary" onClick={() => markSettled(dueTxn)}>
-            <Icon name="check" size={16} />
-            {r.kind === "income" ? "Marquer reçu" : "Marquer payé"}
-          </button>
-        )}
-        {settledTxn && (
-          <button
-            className="icon-button"
-            title="Corriger : remettre à prévu"
-            aria-label={`${
-              r.kind === "income" ? "Remettre à recevoir" : "Remettre à payer"
-            } ${r.label}`}
-            onClick={() => revertToPlanned(settledTxn)}
-          >
-            <Icon name="refresh" size={17} />
-          </button>
-        )}
-        <button
-          className="icon-button"
-          aria-label={`Modifier ${r.label}`}
-          onClick={() => edit({ type: "recurrence", id: r.id })}
-        >
-          <Icon name="edit" size={17} />
-        </button>
       </div>
     );
   }
