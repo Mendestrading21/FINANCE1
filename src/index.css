@@ -802,6 +802,7 @@ img.brand-mark {
 .row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   padding: 15px 0;
   border-bottom: 1px solid var(--line-soft);
@@ -834,8 +835,12 @@ img.brand-mark {
   color: #d0aec3;
 }
 .row-main {
-  flex: 1;
-  min-width: 0;
+  /* A firm floor, not 0: without it, flex-wrap never has a reason to trigger, and an
+   * action wider than the old icon-only button (see .row > .button below) squeezes this
+   * down to nothing instead — collapsing the label to one character per line via the
+   * overflow-wrap below it needs. Wrapping the action onto its own line reads far better. */
+  flex: 1 1 140px;
+  min-width: 140px;
 }
 .row-title {
   display: block;
@@ -854,6 +859,8 @@ img.brand-mark {
   overflow-wrap: anywhere;
 }
 .row-value {
+  flex-shrink: 0;
+  margin-left: auto;
   text-align: right;
   font-size: 14px;
   font-weight: 550;
@@ -862,6 +869,13 @@ img.brand-mark {
 }
 .row-value .row-detail {
   font-weight: 400;
+}
+/* A text action (e.g. "Marquer payé") is wider than the icon-only actions this was
+ * originally sized for; keep it whole and let it wrap onto its own line rather than
+ * shrink into its own internal line break or squeeze .row-main (see .row-main above). */
+.row > .button {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 .row > .icon-button {
   border-color: transparent;

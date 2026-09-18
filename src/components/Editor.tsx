@@ -90,7 +90,11 @@ export default function Editor({
     recurrenceKind === "income" ? "income" : expenseRecurrenceType;
   const item =
     spec.type === "transaction"
-      ? (data.transactions.find((i) => i.id === spec.id) ?? spec.transaction)
+      ? // spec.transaction must win: it carries the caller's explicit intent (e.g.
+        // markSettled's status:"settled", date:today()) even when the same id already
+        // has a persisted, stale record — the pencil/edit action never sets this field,
+        // so it is unaffected and still resolves the persisted record as before.
+        (spec.transaction ?? data.transactions.find((i) => i.id === spec.id))
       : spec.type === "account" || spec.type === "balance"
         ? data.accounts.find((i) => i.id === spec.id)
         : spec.type === "goal"

@@ -367,6 +367,54 @@ test("daily entries: income, currency-synced transfer, recurrence, investment-on
     .getByRole("button", { name: "Remettre à payer Assurance test", exact: true })
     .click();
   await expect(occurrenceRow).toContainText("Pas encore payé");
+  // Regression: the occurrence is now a persisted transaction (status "planned"), not a
+  // virtual one anymore. Clicking "Marquer payé" a second time must still open the editor
+  // pre-filled to settled/today — spec.transaction must win over the stale persisted
+  // record, not the other way around (see EditorSpec.transaction in Editor.tsx).
+  await occurrenceRow
+    .getByRole("button", { name: "Marquer payé", exact: true })
+    .click();
+  dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("État", { exact: true })).toHaveValue("settled");
+  await expect(
+    dialog.getByLabel("Date de l’opération ou échéance", { exact: true }),
+  ).not.toHaveValue("");
+  await dialog
+    .getByRole("button", { name: "Enregistrer", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(occurrenceRow).toContainText("Payé");
+  await expect(occurrenceRow).not.toContainText("Pas encore payé");
+
+  // 2ter) Même régression pour une opération ponctuelle déjà persistée dès sa création
+  // (pas liée à une récurrence) : "Marquer payé" doit aussi la préremplir correctement.
+  await page.getByRole("button", { name: "Ajouter", exact: true }).click();
+  dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Libellé").fill("Café test");
+  await dialog.getByLabel("Montant", { exact: true }).fill("6");
+  await dialog
+    .getByLabel("Compte", { exact: true })
+    .selectOption({ label: "Compte principal test · CHF" });
+  await dialog
+    .getByRole("button", { name: "Enregistrer", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  const oneOffRow = page.locator(".row", { hasText: "Café test" });
+  await expect(oneOffRow).toContainText("Pas encore payé");
+  await oneOffRow
+    .getByRole("button", { name: "Marquer payé", exact: true })
+    .click();
+  dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("État", { exact: true })).toHaveValue("settled");
+  await expect(
+    dialog.getByLabel("Date de l’opération ou échéance", { exact: true }),
+  ).not.toHaveValue("");
+  await dialog
+    .getByRole("button", { name: "Enregistrer", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(oneOffRow).toContainText("Payé");
+  await expect(oneOffRow).not.toContainText("Pas encore payé");
 
   // 3) Transfer between two accounts of different currencies: source account is required,
   // currency is deduced from it, and the destination amount is required across currencies.
