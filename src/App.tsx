@@ -1166,16 +1166,17 @@ export default function App() {
                 <Allocation
                   hidden={hidden}
                   currency={currency}
-                  items={wealth.items.flatMap((i) =>
-                    i.valueMinor === null
+                  // Ordered like sortedAccounts (largest to smallest), not wealth.items'
+                  // insertion order — docs/PLAN_AMELIORATION_V2.md also asks répartitions
+                  // to sort, not just the account list itself.
+                  items={sortedAccounts.flatMap((a) => {
+                    const valueMinor = wealth.items.find(
+                      (i) => i.accountId === a.id,
+                    )?.valueMinor;
+                    return valueMinor == null
                       ? []
-                      : [
-                          {
-                            name: accountName(i.accountId),
-                            value: i.valueMinor,
-                          },
-                        ],
-                  )}
+                      : [{ name: accountName(a.id), value: valueMinor }];
+                  })}
                 />
                 <p className="footer-note">
                   Actifs positifs uniquement. Dettes déduites du patrimoine
