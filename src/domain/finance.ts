@@ -159,6 +159,21 @@ export function withRecurrenceAmount(
   };
 }
 
+/** Normalizes any cadence to a monthly figure for comparison — e.g. 1200/year and 100/month
+ * both become 100 — rounded half away from zero to the nearest cent, exactly once. Never used
+ * as the real due/settled amount (that stays the actual per-occurrence debit, per
+ * amelioration-v2.md "ne pas... classer un débit annuel réel avec un équivalent mensuel
+ * caché"): only for the "Montant mensuel" sort/display, always labeled as an equivalent. */
+export function monthlyEquivalentMinor(
+  recurrence: Recurrence,
+  at = today(),
+): number {
+  return roundRatio(
+    BigInt(recurrenceAmountAt(recurrence, at)),
+    BigInt(recurrence.intervalMonths),
+  );
+}
+
 /** The date `recurrence`'s occurrence is due in `month`, or null if it has none there
  * (inactive, before its start, after its end, or `month` isn't a multiple of
  * `intervalMonths` away from `startDate`). Shared by `transactionsForMonth` (which only
@@ -355,6 +370,51 @@ export function cohortSummary(
         ? sum([dueMinor, -settledMinor])
         : null,
     activeCount: data.recurrences.filter((r) => r.active).length,
+    partial,
+    excluded,
+  };
+}
+
+export type RecurringFlowSummary = {
+  paidMinor: number | null;
+  receivedMinor: number | null;
+  partial: boolean;
+  excluded: number;
+};
+/** "Payé en <mois>" / "Reçu en <mois>", scoped to recurrence-linked settlements — the flux
+ * réalisé side of the Abonnements page's résumé, kept separate from `cohortSummary`'s cohort
+ * totals per amelioration-v2.md. Reuses `transactionsForMonth`, which already buckets a
+ * settlement by its real date regardless of which month the occurrence was due in — so a
+ * charge due in February and paid in March counts here in March, matching monthSummary. A
+ * transfer/saving recurrence is excluded from both sides (amelioration-v2.md: "les transferts
+ * et mises de côté ne gonflent pas dépenses et revenus"); a settled-but-undated transaction
+ * makes the total partial rather than being silently skipped or counted as today. */
+export function recurringFlowSummary(
+  data: FinanceData,
+  month: string,
+  currency: string,
+): RecurringFlowSummary {
+  const paidParts: number[] = [];
+  const receivedParts: number[] = [];
+  let excluded = 0;
+  for (const t of transactionsForMonth(data, month)) {
+    if (!t.recurrenceId || t.status !== "settled" || t.kind === "transfer")
+      continue;
+    if (t.date === null) {
+      excluded++;
+      continue;
+    }
+    const value = convertMinor(t.amountMinor, t.currency, currency, data.fxRates, t.date);
+    if (value === null) {
+      excluded++;
+      continue;
+    }
+    (t.kind === "income" ? receivedParts : paidParts).push(value);
+  }
+  const partial = excluded > 0;
+  return {
+    paidMinor: partial ? null : sum(paidParts),
+    receivedMinor: partial ? null : sum(receivedParts),
     partial,
     excluded,
   };

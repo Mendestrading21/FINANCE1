@@ -6,6 +6,7 @@ import {
   latestBalance,
   money,
   monthLabel,
+  monthlyEquivalentMinor,
   monthSummary,
   nextOccurrenceDate,
   occurrenceCohort,
@@ -13,6 +14,7 @@ import {
   rankAccounts,
   rankByValue,
   recurrenceAmountAt,
+  recurringFlowSummary,
   today,
   transactionsForMonth,
   wealthSummary,
@@ -804,6 +806,127 @@ describe("résumé de la cohorte (cohortSummary)", () => {
     const summary = cohortSummary(d, "2026-02", "CHF");
     expect(summary.dueMinor).toBe(10000);
     expect(summary.settledMinor).toBe(8550); // 9000 * 0.95, not treated as 9000 CHF
+  });
+});
+
+describe("flux réalisé récurrent (recurringFlowSummary)", () => {
+  it("sur l'exemple obligatoire, la charge compte dans le flux de mars, pas de février", () => {
+    const d = data({
+      recurrences: [lateRecurrence],
+      transactions: [settledInMarch],
+    });
+    expect(recurringFlowSummary(d, "2026-02", "CHF")).toMatchObject({
+      paidMinor: 0,
+      receivedMinor: 0,
+      partial: false,
+    });
+    expect(recurringFlowSummary(d, "2026-03", "CHF")).toMatchObject({
+      paidMinor: 10000,
+      receivedMinor: 0,
+      partial: false,
+    });
+  });
+  it("sépare payé (dépense) et reçu (revenu)", () => {
+    const salary = recurrence({
+      id: "salary",
+      kind: "income",
+      recurrenceType: "income",
+      amountMinor: 500000,
+      day: 25,
+      startDate: "2026-01-25",
+    });
+    const salaryReceived = transaction({
+      id: "salary:2026-02-25",
+      kind: "income",
+      amountMinor: 500000,
+      status: "settled",
+      date: "2026-02-25",
+      recurrenceId: "salary",
+      occurrenceDate: "2026-02-25",
+    });
+    const d = data({
+      recurrences: [lateRecurrence, salary],
+      transactions: [settledInMarch, salaryReceived],
+    });
+    expect(recurringFlowSummary(d, "2026-02", "CHF")).toMatchObject({
+      paidMinor: 0,
+      receivedMinor: 500000,
+    });
+  });
+  it("ignore un lien non lié à une récurrence et une opération encore planifiée", () => {
+    const d = data({
+      recurrences: [lateRecurrence],
+      transactions: [
+        transaction({ id: "one-off", status: "settled", date: "2026-02-10" }),
+        transaction({
+          id: "rent:2026-02-28",
+          status: "planned",
+          date: "2026-02-28",
+          recurrenceId: "rent",
+          occurrenceDate: "2026-02-28",
+        }),
+      ],
+    });
+    expect(recurringFlowSummary(d, "2026-02", "CHF")).toMatchObject({
+      paidMinor: 0,
+      receivedMinor: 0,
+    });
+  });
+  it("un règlement lié mais sans date rend le total partiel plutôt que de l'ignorer", () => {
+    const d = data({
+      recurrences: [lateRecurrence],
+      transactions: [
+        transaction({
+          id: "rent:2026-02-28",
+          status: "settled",
+          date: null,
+          budgetMonth: "2026-02",
+          recurrenceId: "rent",
+          occurrenceDate: "2026-02-28",
+        }),
+      ],
+    });
+    expect(recurringFlowSummary(d, "2026-02", "CHF")).toMatchObject({
+      paidMinor: null,
+      receivedMinor: null,
+      partial: true,
+      excluded: 1,
+    });
+  });
+});
+
+describe("équivalent mensuel (monthlyEquivalentMinor)", () => {
+  it("120/an et 10/mois donnent le même équivalent, sans classer un débit annuel comme mensuel", () => {
+    const yearly = recurrence({
+      amountMinor: 12000,
+      intervalMonths: 12,
+      startDate: "2026-01-01",
+    });
+    const monthly = recurrence({
+      id: "other",
+      amountMinor: 1000,
+      intervalMonths: 1,
+      startDate: "2026-01-01",
+    });
+    expect(monthlyEquivalentMinor(yearly)).toBe(1000);
+    expect(monthlyEquivalentMinor(monthly)).toBe(1000);
+    // The real due amount is untouched — the equivalent is a separate, explicitly labeled figure.
+    expect(recurrenceAmountAt(yearly, "2026-01-01")).toBe(12000);
+  });
+  it("arrondit au centime le plus proche, moitié loin de zéro", () => {
+    const quarterly = recurrence({ amountMinor: 100, intervalMonths: 3 });
+    expect(monthlyEquivalentMinor(quarterly)).toBe(33); // 33.33 -> 33
+    const quarterlyRoundUp = recurrence({ amountMinor: 200, intervalMonths: 3 });
+    expect(monthlyEquivalentMinor(quarterlyRoundUp)).toBe(67); // 66.67 -> 67
+  });
+  it("suit l'historique de montant, pas seulement le montant courant", () => {
+    const raised = withRecurrenceAmount(
+      recurrence({ amountMinor: 10000, intervalMonths: 12, startDate: "2026-01-01" }),
+      24000,
+      "2026-06-01",
+    );
+    expect(monthlyEquivalentMinor(raised, "2026-01-01")).toBe(833); // 10000/12
+    expect(monthlyEquivalentMinor(raised, "2026-06-01")).toBe(2000); // 24000/12
   });
 });
 

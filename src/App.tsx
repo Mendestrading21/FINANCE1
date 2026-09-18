@@ -11,16 +11,24 @@ import {
   emptyData,
   type FinanceData,
   type Account,
+  type Recurrence,
   type Source,
   type Transaction,
 } from "./domain/types";
 import {
   availableSummary,
+  cohortSummary,
   latestBalance,
   money,
   monthLabel,
   monthSummary,
+  monthlyEquivalentMinor,
+  nextOccurrenceDate,
+  occurrenceCohort,
   rankAccounts,
+  rankByValue,
+  recurrenceAmountAt,
+  recurringFlowSummary,
   today,
   transactionsForMonth,
   wealthSummary,
@@ -44,6 +52,12 @@ const pages = [
   { id: "overview", name: "Vue d’ensemble", short: "Accueil", icon: "home" },
   { id: "month", name: "Mon mois", short: "Mon mois", icon: "calendar" },
   { id: "accounts", name: "Mes comptes", short: "Comptes", icon: "wallet" },
+  {
+    id: "subscriptions",
+    name: "Abonnements",
+    short: "Abonnements",
+    icon: "refresh",
+  },
   { id: "goals", name: "Épargne et projets", short: "Projets", icon: "target" },
   {
     id: "investments",
@@ -404,6 +418,8 @@ export default function App() {
     [message, setMessage] = useState(""),
     [error, setError] = useState(""),
     [filter, setFilter] = useState("all"),
+    [subsStatus, setSubsStatus] = useState<"all" | "due" | "settled">("all"),
+    [subsSort, setSubsSort] = useState<"amount" | "next">("amount"),
     [more, setMore] = useState(false),
     [pendingImport, setPendingImport] = useState<FinanceData | null>(null),
     [busy, setBusy] = useState(false),
@@ -467,6 +483,8 @@ export default function App() {
     setPage(p);
     setMore(false);
     setFilter("all");
+    setSubsStatus("all");
+    setSubsSort("amount");
     window.scrollTo({ top: 0, behavior: "instant" });
   }
   async function persist(next: FinanceData) {
@@ -629,6 +647,69 @@ export default function App() {
     setError("");
     setEditor(spec);
   };
+  const recurrenceTypeLabels: Record<Recurrence["recurrenceType"], string> = {
+    subscription: "Abonnement",
+    bill: "Charge",
+    income: "Revenu récurrent",
+    saving: "Épargne / mise de côté",
+    other: "À vérifier",
+  };
+  // The cohort is keyed by recurrenceId: `occurrenceCohort` only ever produces at most one
+  // entry per active recurrence for a given month (see finance.ts), so this lookup is safe.
+  const subsCohortItems = occurrenceCohort(data, month);
+  const subsCohortByRecurrence = new Map(
+    subsCohortItems.map((i) => [i.recurrenceId, i]),
+  );
+  const subsCohort = cohortSummary(data, month, currency);
+  const subsFlow = recurringFlowSummary(data, month, currency);
+  const subsMatchesType = (r: Recurrence) =>
+    filter === "all" || r.recurrenceType === filter;
+  const subsMatchesStatus = (r: Recurrence) => {
+    if (subsStatus === "all") return true;
+    const item = subsCohortByRecurrence.get(r.id);
+    return subsStatus === "settled" ? !!item?.settled : !!item && !item.settled;
+  };
+  const subsActive = data.recurrences.filter(
+    (r) => r.active && subsMatchesType(r) && subsMatchesStatus(r),
+  );
+  const subsInactive = data.recurrences
+    .filter((r) => !r.active && subsMatchesType(r))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  const subsSortedActive =
+    subsSort === "amount"
+      ? rankByValue(
+          subsActive,
+          (r) => ({ valueMinor: monthlyEquivalentMinor(r), valuationDate: today() }),
+          (r) => r.id,
+        ).ranked.map((v) => v.item)
+      : [...subsActive].sort((a, b) => {
+          const da = nextOccurrenceDate(a),
+            db = nextOccurrenceDate(b);
+          if (da === db) return a.id.localeCompare(b.id);
+          if (da === null) return 1;
+          if (db === null) return -1;
+          return da.localeCompare(db);
+        });
+  // Prefills "Marquer payé/reçu" from a not-yet-persisted occurrence, mirroring
+  // `transactionsForMonth`'s own virtual-transaction shape and id (`recurrenceId:date`) so a
+  // settlement made here and one made from Mon mois never create two different transactions
+  // for the same occurrence.
+  function subsVirtualTransaction(r: Recurrence, dueDate: string, amountMinor: number): Transaction {
+    return {
+      id: `${r.id}:${dueDate}`,
+      label: r.label,
+      kind: r.kind,
+      amountMinor,
+      currency: r.currency,
+      status: "planned",
+      date: dueDate,
+      accountId: r.accountId,
+      category: r.category,
+      recurrenceId: r.id,
+      occurrenceDate: dueDate,
+      source: r.source,
+    };
+  }
   const kinds = {
     bank: "Compte bancaire",
     savings: "Épargne",
@@ -857,6 +938,94 @@ export default function App() {
       </div>
     );
   }
+  function subscriptionRow(r: Recurrence) {
+    const cohortItem = subsCohortByRecurrence.get(r.id);
+    const settledTxn = cohortItem?.settled
+      ? data?.transactions.find((t) => t.id === cohortItem.settled!.transactionId)
+      : undefined;
+    const dueTxn =
+      cohortItem && !cohortItem.settled
+        ? subsVirtualTransaction(r, cohortItem.occurrenceDate, cohortItem.dueAmountMinor)
+        : null;
+    const nextDate = r.active ? nextOccurrenceDate(r) : null;
+    const nextAmount = nextDate ? recurrenceAmountAt(r, nextDate) : null;
+    const monthlyEquiv = r.intervalMonths > 1 ? monthlyEquivalentMinor(r) : null;
+    return (
+      <div className="row" key={r.id}>
+        <span className="row-icon">
+          <Icon name="refresh" />
+        </span>
+        <div className="row-main">
+          <span className="row-title">{r.label}</span>
+          <span className="row-detail">
+            {recurrenceTypeLabels[r.recurrenceType]} · Le {r.day} ·{" "}
+            {r.intervalMonths === 1 ? "tous les mois" : `tous les ${r.intervalMonths} mois`}{" "}
+            · {accountName(r.accountId)}
+          </span>
+          <span className="row-detail">
+            {!r.active
+              ? r.endDate
+                ? `Terminé le ${r.endDate}`
+                : "En pause"
+              : cohortItem
+                ? cohortItem.settled
+                  ? `${r.kind === "income" ? "Reçu" : "Payé"} le ${
+                      cohortItem.settled.date ?? "date inconnue"
+                    }${
+                      cohortItem.settled.date &&
+                      cohortItem.settled.date.slice(0, 7) !== month
+                        ? " · hors du mois sélectionné"
+                        : ""
+                    }`
+                  : r.kind === "income"
+                    ? "Pas encore reçu"
+                    : "Pas encore payé"
+                : "Aucune échéance ce mois-ci"}
+          </span>
+        </div>
+        <div className="row-value">
+          {nextDate ? (
+            <>
+              {display(nextAmount, r.currency)}
+              <span className="row-detail">Prochaine échéance : {nextDate}</span>
+              {monthlyEquiv !== null && (
+                <span className="row-detail">
+                  ≈ {display(monthlyEquiv, r.currency)}/mois
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="row-detail">Aucune échéance à venir</span>
+          )}
+        </div>
+        {dueTxn && (
+          <button className="button small secondary" onClick={() => markSettled(dueTxn)}>
+            <Icon name="check" size={16} />
+            {r.kind === "income" ? "Marquer reçu" : "Marquer payé"}
+          </button>
+        )}
+        {settledTxn && (
+          <button
+            className="icon-button"
+            title="Corriger : remettre à prévu"
+            aria-label={`${
+              r.kind === "income" ? "Remettre à recevoir" : "Remettre à payer"
+            } ${r.label}`}
+            onClick={() => revertToPlanned(settledTxn)}
+          >
+            <Icon name="refresh" size={17} />
+          </button>
+        )}
+        <button
+          className="icon-button"
+          aria-label={`Modifier ${r.label}`}
+          onClick={() => edit({ type: "recurrence", id: r.id })}
+        >
+          <Icon name="edit" size={17} />
+        </button>
+      </div>
+    );
+  }
   const goals = data.goals.map((g) => {
     const progress =
       g.targetMinor && g.reservedMinor !== null
@@ -990,9 +1159,11 @@ export default function App() {
                   ? "Ce qui entre, ce qui sort et ce qui reste à prévoir."
                   : page === "accounts"
                     ? "Chaque compte, avec sa devise et la date de son solde."
-                    : page === "goals"
-                      ? "Donnez une place à ce qui compte pour vous."
-                      : page === "investments"
+                    : page === "subscriptions"
+                      ? "Ce qui est dû ce mois-ci, ce qui est réglé et ce qui reste."
+                      : page === "goals"
+                        ? "Donnez une place à ce qui compte pour vous."
+                        : page === "investments"
                         ? "Vos positions, rattachées à leurs comptes."
                         : "Vos pièces et vos données, à portée de main."}
             </p>
@@ -1004,11 +1175,13 @@ export default function App() {
                 type:
                   page === "accounts"
                     ? "account"
-                    : page === "goals"
-                      ? "goal"
-                      : page === "investments"
-                        ? "position"
-                        : "transaction",
+                    : page === "subscriptions"
+                      ? "recurrence"
+                      : page === "goals"
+                        ? "goal"
+                        : page === "investments"
+                          ? "position"
+                          : "transaction",
               })
             }
           >
@@ -1346,41 +1519,36 @@ export default function App() {
               )}
             </Card>
             <Card
-              title="Charges récurrentes"
+              title="Abonnements et charges récurrentes"
               action={
                 <button
                   className="card-action"
-                  onClick={() => edit({ type: "recurrence" })}
+                  onClick={() => navigate("subscriptions")}
                 >
-                  Ajouter une récurrence
+                  Voir tout <Icon name="chevron-right" size={16} />
                 </button>
               }
             >
-              {data.recurrences.map((r) => (
-                <div className="row" key={r.id}>
-                  <span className="row-icon">
-                    <Icon name="refresh" />
-                  </span>
-                  <div className="row-main">
-                    <span className="row-title">{r.label}</span>
-                    <span className="row-detail">
-                      Le {r.day} · tous les {r.intervalMonths} mois ·{" "}
-                      {r.active ? "active" : "en pause"}
+              {data.recurrences
+                .filter((r) => r.active)
+                .slice(0, 4)
+                .map((r) => (
+                  <div className="row" key={r.id}>
+                    <span className="row-icon">
+                      <Icon name="refresh" />
+                    </span>
+                    <div className="row-main">
+                      <span className="row-title">{r.label}</span>
+                      <span className="row-detail">
+                        Le {r.day} · tous les {r.intervalMonths} mois
+                      </span>
+                    </div>
+                    <span className="row-value">
+                      {display(r.amountMinor, r.currency)}
                     </span>
                   </div>
-                  <span className="row-value">
-                    {display(r.amountMinor, r.currency)}
-                  </span>
-                  <button
-                    className="icon-button"
-                    aria-label={`Modifier ${r.label}`}
-                    onClick={() => edit({ type: "recurrence", id: r.id })}
-                  >
-                    <Icon name="edit" />
-                  </button>
-                </div>
-              ))}
-              {!data.recurrences.length && (
+                ))}
+              {!data.recurrences.some((r) => r.active) && (
                 <div className="empty-state">
                   Vos abonnements et charges récurrentes apparaîtront ici.
                 </div>
@@ -1400,6 +1568,148 @@ export default function App() {
                 Ajoutez votre premier compte ou importez un fichier Finance.
               </div>
             )}
+          </>
+        )}
+        {page === "subscriptions" && (
+          <>
+            <div className="notice">
+              Cohorte d’échéances : ce qui est dû en {monthLabel(month)}, quel
+              que soit le mois du règlement. Flux réalisé : ce qui a
+              réellement été réglé en {monthLabel(month)}, quelle que soit
+              l’échéance d’origine.
+            </div>
+            <div className="stat-grid">
+              {[
+                {
+                  label: `Dû en ${monthLabel(month)}`,
+                  value:
+                    subsCohort.dueMinor !== null
+                      ? display(subsCohort.dueMinor)
+                      : "—",
+                },
+                {
+                  label: `Réglé pour ${monthLabel(month)}`,
+                  value:
+                    subsCohort.settledMinor !== null
+                      ? display(subsCohort.settledMinor)
+                      : "—",
+                },
+                {
+                  label: "Reste dû",
+                  value:
+                    subsCohort.remainingMinor !== null
+                      ? display(subsCohort.remainingMinor)
+                      : "—",
+                },
+                {
+                  label: "Abonnements et charges actifs",
+                  value: String(subsCohort.activeCount),
+                },
+              ].map((s) => (
+                <div className="stat-card" key={s.label}>
+                  <p className="metric-label">{s.label}</p>
+                  <div className="metric-value">{s.value}</div>
+                </div>
+              ))}
+            </div>
+            {subsCohort.partial && (
+              <p className="meta">
+                {subsCohort.excluded} occurrence(s) exclue(s) du total : taux
+                de change manquant.
+              </p>
+            )}
+            <div className="stat-grid">
+              {[
+                {
+                  label: `Payé en ${monthLabel(month)}`,
+                  value:
+                    subsFlow.paidMinor !== null ? display(subsFlow.paidMinor) : "—",
+                },
+                {
+                  label: `Reçu en ${monthLabel(month)}`,
+                  value:
+                    subsFlow.receivedMinor !== null
+                      ? display(subsFlow.receivedMinor)
+                      : "—",
+                },
+              ].map((s) => (
+                <div className="stat-card" key={s.label}>
+                  <p className="metric-label">{s.label}</p>
+                  <div className="metric-value">{s.value}</div>
+                </div>
+              ))}
+            </div>
+            {subsFlow.partial && (
+              <p className="meta">
+                {subsFlow.excluded} règlement(s) exclu(s) du total : date ou
+                taux de change manquant.
+              </p>
+            )}
+            <Card title="Actifs">
+              <div className="tab-bar">
+                {[
+                  ["all", "Tous"],
+                  ["subscription", "Abonnements"],
+                  ["bill", "Charges"],
+                  ["income", "Revenus"],
+                ].map(([v, l]) => (
+                  <button
+                    key={v}
+                    className={`tab-button ${filter === v ? "active" : ""}`}
+                    onClick={() => setFilter(v)}
+                  >
+                    {l}
+                  </button>
+                ))}
+              </div>
+              <div className="tab-bar">
+                {(
+                  [
+                    ["all", "Tous les statuts"],
+                    ["settled", "Payé / Reçu"],
+                    ["due", "À payer / recevoir"],
+                  ] as const
+                ).map(([v, l]) => (
+                  <button
+                    key={v}
+                    className={`tab-button ${subsStatus === v ? "active" : ""}`}
+                    onClick={() => setSubsStatus(v)}
+                  >
+                    {l}
+                  </button>
+                ))}
+              </div>
+              <label className="currency-picker">
+                <span className="sr-only">Trier les abonnements par</span>
+                <select
+                  aria-label="Trier les abonnements par"
+                  value={subsSort}
+                  onChange={(e) =>
+                    setSubsSort(e.target.value as "amount" | "next")
+                  }
+                >
+                  <option value="amount">Trier : montant mensuel</option>
+                  <option value="next">Trier : prochaine échéance</option>
+                </select>
+              </label>
+              {subsSortedActive.map(subscriptionRow)}
+              {!subsSortedActive.length && (
+                <div className="empty-state">
+                  {data.recurrences.some((r) => r.active)
+                    ? "Aucun élément ne correspond à ces filtres."
+                    : "Vos abonnements et charges récurrentes actifs apparaîtront ici."}
+                </div>
+              )}
+            </Card>
+            <details className="account-history">
+              <summary>En pause ou terminés ({subsInactive.length})</summary>
+              {subsInactive.map(subscriptionRow)}
+              {!subsInactive.length && (
+                <p className="meta">
+                  Aucun abonnement ou charge en pause ou terminé.
+                </p>
+              )}
+            </details>
           </>
         )}
         {page === "goals" && (

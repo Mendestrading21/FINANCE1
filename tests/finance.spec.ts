@@ -289,10 +289,10 @@ test("daily entries: income, currency-synced transfer, recurrence, investment-on
   ).toBeVisible();
 
   // 2) Recurrence: currency prefilled from the chosen account, no duplicate entry.
-  await nav.getByRole("button", { name: "Mon mois", exact: true }).click();
-  await page
-    .getByRole("button", { name: "Ajouter une récurrence", exact: true })
-    .click();
+  // Created and edited from the dedicated Abonnements page, which owns recurrence
+  // management; Mon mois only previews active recurrences and links out to it.
+  await nav.getByRole("button", { name: "Abonnements", exact: true }).click();
+  await page.getByRole("button", { name: "Ajouter", exact: true }).click();
   dialog = page.getByRole("dialog");
   await dialog.getByLabel("Libellé", { exact: true }).fill("Assurance test");
   // Nature must survive a Type round trip: choosing "Charge" and then switching
@@ -338,7 +338,9 @@ test("daily entries: income, currency-synced transfer, recurrence, investment-on
 
   // 2bis) Statuts explicites : "Marquer payé" ouvre l'éditeur avec la date de règlement
   // visible et modifiable (pas d'écriture silencieuse), "Remettre à payer" revient en
-  // arrière sans effacer la trace du règlement précédent.
+  // arrière sans effacer la trace du règlement précédent. Exercised from Mon mois' own
+  // transactions list (the "flux réalisé" side), independent of the Abonnements page.
+  await nav.getByRole("button", { name: "Mon mois", exact: true }).click();
   const occurrenceRow = page
     .locator(".row", { hasText: "Assurance test" })
     .filter({ hasNotText: "tous les" });
