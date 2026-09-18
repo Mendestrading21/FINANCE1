@@ -1,5 +1,8 @@
 import { test, expect } from "@playwright/test";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, cp, mkdtemp, rm } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
+import { tmpdir } from "node:os";
+import { join, extname } from "node:path";
 const passphrase = "Exemple-test-Finance-2026"; // Synthetic test credential; never used for a real vault.
 test("private vault: account, dated balance, operation, lock, wrong password, reload", async ({
   page,
@@ -914,4 +917,133 @@ test("review items: an unbroken long reason from an import wraps instead of over
     ),
   ).toBe(true);
   expect(errors).toEqual([]);
+});
+
+const STATIC_MIME_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+};
+// A private static file server for the PWA update test below: it mutates files on disk to
+// simulate a second deploy, and playwright.config.ts's default (fullyParallel, multiple workers,
+// same as CI's `pnpm run test:e2e`) means another test could otherwise run concurrently against
+// the *shared* dist/ this suite's baseURL server also reads from — this keeps that mutation
+// confined to a private copy nothing else touches, instead of relying on --workers=1.
+function serveStaticDir(root: string): Promise<{ server: Server; port: number }> {
+  const server = createServer((req, res) => {
+    const url = new URL(req.url || "/", "http://localhost");
+    const relativePath = url.pathname === "/" ? "/index.html" : url.pathname;
+    readFile(join(root, decodeURIComponent(relativePath)))
+      .then((body) => {
+        res.writeHead(200, {
+          "Content-Type":
+            STATIC_MIME_TYPES[extname(relativePath)] || "application/octet-stream",
+        });
+        res.end(body);
+      })
+      .catch(() => {
+        res.writeHead(404);
+        res.end();
+      });
+  });
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      resolve({ server, port });
+    });
+  });
+}
+
+// Regression: sw.js's install/activate handlers used to omit skipWaiting()/clients.claim(), so a
+// newly deployed shell stayed "waiting" and an already-open tab (or installed PWA) kept serving
+// the OLD cached shell indefinitely — until every tab was fully closed and reopened, not merely
+// reloaded. In practice this meant a page or fix shipped in a later release could stay invisible
+// to a user who already had the app open, with no obvious way to tell why (this is exactly what
+// happened with the Abonnements page). This test copies the repo's own dist/ (built by test:e2e's
+// setup, same as every other test here) into a private temp directory served by its own HTTP
+// server, and simulates a *second* deploy by editing that copy's sw.js cache version and
+// index.html content directly — rebuilding a second time via vite would be slower and isn't
+// needed to exercise the service worker logic itself, which is what this test targets. It then
+// asks the browser to check for an update and confirms the ALREADY OPEN tab is offered — and can
+// apply — the new content on its own, without the test ever closing the browser context.
+test("PWA update: a new deploy offers an already-open tab a reload, without closing it", async ({
+  page,
+}) => {
+  const siteDir = join(
+    await mkdtemp(join(tmpdir(), "finance-pwa-test-")),
+    "site",
+  );
+  await cp("dist", siteDir, { recursive: true });
+  const { server, port } = await serveStaticDir(siteDir);
+
+  try {
+    const indexPath = join(siteDir, "index.html");
+    const swPath = join(siteDir, "sw.js");
+    const originalIndex = await readFile(indexPath, "utf8");
+    const originalSw = await readFile(swPath, "utf8");
+
+    await page.goto(`http://127.0.0.1:${port}/`);
+    // The "Recharger" notice only renders in the unlocked layout — it exists to warn against
+    // losing unsaved edits and re-locking an *open* vault, which requires one to actually be
+    // open here too, not the plain lock screen.
+    await page
+      .getByLabel("Phrase secrète", { exact: true })
+      .fill("Exemple-test-Finance-pwa-update-2026");
+    await page
+      .getByLabel("Confirmer la phrase secrète")
+      .fill("Exemple-test-Finance-pwa-update-2026");
+    await page.getByRole("button", { name: "Créer mon coffre" }).click();
+    await page.waitForFunction(
+      () => navigator.serviceWorker.controller !== null,
+      null,
+      { timeout: 15000 },
+    );
+
+    const marker = `test-marker-${Date.now()}`;
+    await writeFile(
+      indexPath,
+      originalIndex.replace(
+        "<title>",
+        `<meta name="test-marker" content="${marker}" /><title>`,
+      ),
+    );
+    await writeFile(
+      swPath,
+      originalSw.replace(/finance-shell-[a-z0-9]+/, `finance-shell-${marker}`),
+    );
+
+    await page.evaluate(async () => {
+      const registration = await navigator.serviceWorker.getRegistration();
+      await registration?.update();
+    });
+
+    // main.tsx dispatches an "update ready" event once the controller changes (the new service
+    // worker taking over); App.tsx turns that into a dismissible "Recharger" notice rather than
+    // reloading on its own — a silent reload would re-lock the vault and drop any unsaved edit
+    // without warning. Wait for that notice, then click it, instead of reloading manually: a
+    // manual reload would not prove the update-ready wiring actually works end to end.
+    await expect(
+      page.getByRole("button", { name: "Recharger", exact: true }),
+    ).toBeVisible({ timeout: 15000 });
+    await page
+      .getByRole("button", { name: "Recharger", exact: true })
+      .click();
+
+    await page.waitForFunction(
+      (expected) =>
+        document.querySelector('meta[name="test-marker"]')?.getAttribute(
+          "content",
+        ) === expected,
+      marker,
+      { timeout: 15000 },
+    );
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(siteDir, { recursive: true, force: true });
+  }
 });
