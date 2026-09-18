@@ -65,11 +65,23 @@ export default function Editor({
       data.transactions.find((t) => t.id === spec.id)?.kind ||
       "expense",
   );
-  // recurrenceType "income" only applies to kind "income" (validation.ts enforces it); this
-  // tracks the recurrence form's own kind select so the Nature options stay coherent with it.
+  // recurrenceType "income" only applies to kind "income" (validation.ts enforces it), so it
+  // is derived from recurrenceKind rather than stored directly — storing it directly and
+  // forcing it to "income" while kind is income would overwrite whatever the user had chosen
+  // on the expense side, losing it for good on the next switch back. Keeping the expense-side
+  // choice in its own state means a Dépense → Revenu → Dépense round trip never loses it.
   const [recurrenceKind, setRecurrenceKind] = useState<"income" | "expense">(
     data.recurrences.find((r) => r.id === spec.id)?.kind ?? "expense",
   );
+  const [expenseRecurrenceType, setExpenseRecurrenceType] = useState<
+    Exclude<Recurrence["recurrenceType"], "income">
+  >(() => {
+    const existing = data.recurrences.find((r) => r.id === spec.id)
+      ?.recurrenceType;
+    return existing && existing !== "income" ? existing : "subscription";
+  });
+  const recurrenceType: Recurrence["recurrenceType"] =
+    recurrenceKind === "income" ? "income" : expenseRecurrenceType;
   const item =
     spec.type === "transaction"
       ? data.transactions.find((i) => i.id === spec.id)
@@ -573,7 +585,7 @@ export default function Editor({
             <>
               {field("Libellé", "label", { required: true })}
               {field("Type", "kind", {
-                defaultValue: val("kind", "expense"),
+                value: recurrenceKind,
                 onChange: (e) =>
                   setRecurrenceKind(e.target.value as "income" | "expense"),
                 children: (
@@ -584,10 +596,14 @@ export default function Editor({
                 ),
               })}
               {field("Nature", "recurrenceType", {
-                defaultValue: val(
-                  "recurrenceType",
-                  recurrenceKind === "income" ? "income" : "subscription",
-                ),
+                value: recurrenceType,
+                onChange: (e) =>
+                  setExpenseRecurrenceType(
+                    e.target.value as Exclude<
+                      Recurrence["recurrenceType"],
+                      "income"
+                    >,
+                  ),
                 children:
                   recurrenceKind === "income" ? (
                     <option value="income">Revenu récurrent</option>

@@ -297,6 +297,16 @@ test("daily entries: income, currency-synced transfer, recurrence, investment-on
     .click();
   dialog = page.getByRole("dialog");
   await dialog.getByLabel("Libellé", { exact: true }).fill("Assurance test");
+  // Nature must survive a Type round trip: choosing "Charge" and then switching
+  // Type to Revenu and back to Dépense must not silently fall back to "Abonnement".
+  await dialog
+    .getByLabel("Nature", { exact: true })
+    .selectOption("bill");
+  await dialog.getByLabel("Type", { exact: true }).selectOption("income");
+  await dialog.getByLabel("Type", { exact: true }).selectOption("expense");
+  await expect(dialog.getByLabel("Nature", { exact: true })).toHaveValue(
+    "bill",
+  );
   await dialog.getByLabel("Montant", { exact: true }).fill("45");
   await dialog
     .getByLabel("Compte", { exact: true })
@@ -313,6 +323,16 @@ test("daily entries: income, currency-synced transfer, recurrence, investment-on
   await expect(
     page.getByText("Assurance test", { exact: false }).first(),
   ).toBeVisible();
+  // Reopening confirms "bill" was actually saved, not just held in form state.
+  await page
+    .getByRole("button", { name: "Modifier Assurance test", exact: true })
+    .click();
+  dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("Nature", { exact: true })).toHaveValue(
+    "bill",
+  );
+  await dialog.getByRole("button", { name: "Fermer" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 
   // 3) Transfer between two accounts of different currencies: source account is required,
   // currency is deduced from it, and the destination amount is required across currencies.
