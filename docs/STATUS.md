@@ -32,11 +32,15 @@ Relu indépendamment par l’agent `finance-verification` **avant tout push** (m
 
 Preuves : `pnpm run typecheck` (0 erreur), `pnpm run test` (**93/93**, inchangé — ce lot est uniquement UI), `pnpm run build` (réussi), les 4 scénarios `test:e2e` rejoués individuellement, dont le nouveau scénario couvrant le cycle marquer payé → remettre à payer → marquer payé de nouveau (occurrence de récurrence et opération ponctuelle). Captures 390/834/1440 px inspectées visuellement après correction, pas seulement testées automatiquement.
 
-## Lot V2.4 (fonction de tri seule) — développé et testé le 18 septembre 2026
+## Lot V2.4 (comptes et répartitions) — développé et testé le 18 septembre 2026
 
-Seule la fonction de tri est traitée ici ; **son câblage dans les pages (Mes comptes, futures pages Abonnements/Investissements) reste prévu, non développé** — `rankAccounts` existe mais aucune page ne l’appelle encore, donc `docs/AUDIT_UI_V2.md` (« `data.accounts.slice(0,3)` suit l’ordre d’insertion ») reste un défaut visible tel quel dans l’application actuelle.
+Couvre les comptes et les répartitions, les deux listes citées par `docs/PLAN_AMELIORATION_V2.md` (ligne 36 : « Tri : montant décroissant par défaut pour comptes/abonnements/répartitions »). **Le tri des abonnements reste prévu, non développé** — il dépend du lot V2.3 (page Abonnements), pas encore construit.
 
-`accountValue()` est extrait du corps de `wealthSummary` sans changement de comportement (101/101 tests, dont tous ceux de patrimoine déjà existants, passent sans modification), exposant la valeur comparable d’un compte et sa date de valorisation. `rankByValue<T>` est une fonction générique de tri décroissant avec regroupement « À valoriser » pour tout élément sans valeur et date de valorisation communes, clé secondaire stable pour les égalités, qui ne normalise jamais elle-même une mesure (un montant annuel brut n’est pas transformé en équivalent mensuel — c’est à l’appelant de fournir des valeurs déjà comparables). `rankAccounts` l’applique aux comptes.
+`accountValue()` est extrait du corps de `wealthSummary` sans changement de comportement (101/101 tests, dont tous ceux de patrimoine déjà existants, passent sans modification), exposant la valeur comparable d’un compte et sa date de valorisation. `rankByValue<T>` est une fonction générique de tri décroissant avec regroupement « À valoriser » pour tout élément sans valeur et date de valorisation communes, clé secondaire stable pour les égalités, qui ne normalise jamais elle-même une mesure (un montant annuel brut n’est pas transformé en équivalent mensuel — c’est à l’appelant de fournir des valeurs déjà comparables). `rankAccounts` l’applique aux comptes, câblé dans l’aperçu Accueil (3 premiers), la page Mes comptes complète et le filtre investissement de la page Investissements — répond au constat de `docs/AUDIT_UI_V2.md` (« `data.accounts.slice(0,3)` suit l’ordre d’insertion »). La légende du donut « Répartition du patrimoine » (Accueil) suit désormais le même ordre plutôt que celui, non trié, de `wealthSummary`.
+
+Relu indépendamment par l’agent `finance-verification` (distinct de l’auteur), en conditions réelles (pas seulement lu dans le code) : changement de devise d’affichage en direct avec et sans taux disponible, ajout d’un compte en devise sans taux (confirmé dans le groupe « À valoriser », jamais de position devinée), plusieurs comptes d’investissement de valeurs différentes. Verdict « prêt à publier tel quel » sur le câblage des comptes, avec une limite trouvée par recherche large dans le code (pas une régression du diff relu) : la répartition du patrimoine n’était pas encore triée — corrigée dans un commit séparé et revérifiée (mêmes contrôles, capture réelle inspectée).
+
+Preuves : `pnpm run typecheck` (0 erreur), `pnpm run test` (**101/101**, 8 nouveaux tests sur le tri : ordre décroissant, dette, absence de taux commun, zéro, composantes incomplètes, égalités, non-normalisation annuel/mensuel, élément valorisé mais non daté ; aucune fonction de domaine modifiée par le câblage lui-même), `pnpm run build` (réussi), les 4 scénarios `test:e2e` rejoués individuellement. Captures 390/834/1440 px inspectées visuellement après chaque changement, pas seulement testées automatiquement.
 
 Preuves : `pnpm run typecheck` (0 erreur), `pnpm run test` (**101/101**, 8 nouveaux tests : ordre décroissant, dette, absence de taux commun, zéro, composantes incomplètes, égalités, non-normalisation annuel/mensuel, élément valorisé mais non daté), `pnpm run build` (réussi). Travail disjoint des fichiers du lot V2.2 (`finance.ts`/`finance.test.ts` seulement), commité séparément.
 
@@ -48,7 +52,7 @@ Preuves : `pnpm run typecheck` (0 erreur), `pnpm run test` (**101/101**, 8 nouve
 | Audit Notion                      | Terminé pour les sources accessibles lors de l’import initial | Budgets, comptes, factures, revenus, abonnements et espace Trading ont été rapprochés. Les données et ambiguïtés privées restent hors Git.                                                                                                    |
 | Modèle, calculs et coffre         | Développés et testés sur la version actuelle                  | Montants exacts, inconnus explicites, dates distinctes, transferts neutres, coffre chiffré local, sauvegarde et restauration. Pas de serveur ni de synchronisation automatique entre appareils.                                               |
 | Application actuelle              | Livrée : six pages                                            | Vue d’ensemble, Mon mois, Mes comptes, Épargne et projets, Investissements, Documents et réglages. La page Abonnements et les nouveaux états mensuels sont encore **prévus**.                                                                 |
-| Amélioration V2                   | V2.1 développé et testé ; V2.2 (statuts) et V2.4 (fonction de tri) partiels ; reste spécifié, non développé | V2.1, le volet statuts de V2.2 et la fonction `rankAccounts` de V2.4 livrés, voir ci-dessus. Mois lisibles, cohorte d’échéances/flux réalisé, câblage du tri dans les pages, page Abonnements, densité, icônes, établissements et nouveau logo restent **prévus**. |
+| Amélioration V2                   | V2.1 et V2.4 (comptes/répartitions) développés et testés ; V2.2 partiel ; reste spécifié, non développé | V2.1, le volet statuts de V2.2 et V2.4 (comptes et répartitions) livrés, voir ci-dessus. Mois lisibles, cohorte d’échéances/flux réalisé, tri des abonnements (dépend de V2.3), page Abonnements, densité, icônes, établissements et nouveau logo restent **prévus**. |
 | Skill et agents                   | Livrés                                                        | Skill maître Finance, huit références et onze missions spécialisées, dont Abonnements et Identité visuelle.                                                                                                                                   |
 | Publication GitHub                | Livrée                                                        | Branche `main` du dépôt public `Mendestrading21/Finances`. Toute nouvelle modification doit revérifier le HEAD, la CI et l’absence de données privées.                                                                                        |
 | GitHub Pages                      | Livré et vérifié                                              | Site public disponible sur `https://mendestrading21.github.io/Finances/`. Le workflow Pages accepte les publications de `main` et un lancement manuel.                                                                                        |
@@ -74,7 +78,7 @@ Le rapprochement des données personnelles reste nécessaire avant d’affirmer 
 | Relecture V2           | Forward-test indépendant effectué sur migration, occurrence, mois de règlement, tri multidevise, logos et ordre des lots ; ambiguïtés corrigées avant publication. |
 | V2.1 livré             | PR #5 (brouillon) vers `main`, dernier commit de `claude/finance-app-completion-k86h7n` ; contrôles locaux détaillés dans la section « Lot V2.1 » ci-dessus. |
 | V2.2 (statuts) livré   | Même PR #5, mêmes contrôles ; détail dans la section « Lot V2.2 » ci-dessus. |
-| V2.4 (fonction de tri) livré | Même PR #5, mêmes contrôles ; détail dans la section « Lot V2.4 » ci-dessus. |
+| V2.4 (comptes et répartitions) livré | Même PR #5, mêmes contrôles, relu indépendamment ; détail dans la section « Lot V2.4 » ci-dessus. |
 
 Ces preuves n’attestent pas encore l’implémentation de la V2 au-delà de V2.1. Les totaux de tests, SHA et exécutions doivent être relus après chaque nouveau changement. La [revue indépendante](REVUE_INDEPENDANTE.md) décrit les contrôles de l’application initiale et leurs limites.
 
@@ -93,12 +97,11 @@ Toutes les captures utilisent la démonstration fictive. Elles ne prouvent ni Sa
 
 ## Prochaine action
 
-V2.1 (modèle des récurrences et migration), le volet statuts de V2.2 et la fonction de tri de V2.4 sont livrés. Reste à faire, dans l’ordre du plan :
+V2.1 (modèle des récurrences et migration), le volet statuts de V2.2 et V2.4 (comptes et répartitions) sont livrés. Reste à faire, dans l’ordre du plan :
 
 1. **Finir V2.2** : sélecteur de mois en français (Janvier–Décembre, année séparée), puis la distinction cohorte d’échéances / flux réalisé dans le moteur (`src/domain/finance.ts`).
-2. **Câbler V2.4** : appeler `rankAccounts` sur la page Mes comptes (répond au constat encore visible de `docs/AUDIT_UI_V2.md`).
-3. **V2.3 — page Abonnements**, une fois V2.2 complet.
-4. V2.5–V2.8 (densité, icônes/établissements, logo, livraison finale).
+2. **V2.3 — page Abonnements**, une fois V2.2 complet ; y câbler alors le tri des abonnements (dernier élément de V2.4, qui en dépend).
+3. V2.5–V2.8 (densité, icônes/établissements, logo, livraison finale).
 
 Chaque lot suivant n’est terminé qu’avec tests ciblés, parcours navigateur, captures fictives, relecture indépendante, CI distante et site publié vérifiés.
 
