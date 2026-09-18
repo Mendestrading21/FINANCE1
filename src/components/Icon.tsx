@@ -74,6 +74,13 @@ const paths: Record<string, ReactNode> = {
       <path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2" />
     </>
   ),
+  vault: (
+    <>
+      <rect x="3" y="4" width="18" height="17" rx="3" />
+      <circle cx="12" cy="12.5" r="4" />
+      <path d="M12 12.5V9.7" />
+    </>
+  ),
   settings: (
     <>
       <path d="m9 3-.7 3-2.6 1-2.6-.8L1.8 9l2 2.2v2l-2 2.2 1.3 2.8 2.6-.8 2.6 1L9 21h6l.7-2.6 2.6-1 2.6.8 1.3-2.8-2-2.2v-2l2-2.2-1.3-2.8-2.6.8-2.6-1L15 3Z" />

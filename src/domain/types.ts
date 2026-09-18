@@ -46,10 +46,20 @@ export type RecurrenceAmount = {
   amountMinor: number;
   effectiveFrom: string;
 };
+/** Classification distinct from `kind`: `income` is required exactly when `kind` is `"income"`.
+ * `subscription`/`bill`/`saving` only apply to expense recurrences; `other` marks a value
+ * migrated from a schema that had no classification, still to be verified by hand. */
+export type RecurrenceType =
+  | "subscription"
+  | "bill"
+  | "income"
+  | "saving"
+  | "other";
 export type Recurrence = {
   id: string;
   label: string;
   kind: "income" | "expense";
+  recurrenceType: RecurrenceType;
   /** Amount in effect from `amountEffectiveFrom` (or `startDate` if unset) onward. Editing it
    * must go through `withRecurrenceAmount` so earlier, still-unsettled virtual occurrences keep
    * the amount that was actually in effect for them instead of being rewritten retroactively. */
@@ -117,8 +127,11 @@ export type ReviewItem = {
   source: Source;
   raw?: Record<string, unknown>;
 };
+/** 1: no recurrence classification. 2: adds `Recurrence.recurrenceType`. A validated
+ * `FinanceData` in memory is always the current version; `migrateToCurrentVersion` in
+ * `migration.ts` upgrades older raw JSON before `validateData` runs. */
 export type FinanceData = {
-  version: 1;
+  version: 2;
   accounts: Account[];
   transactions: Transaction[];
   recurrences: Recurrence[];
@@ -131,7 +144,7 @@ export type FinanceData = {
   importedAt?: string;
 };
 export const emptyData = (): FinanceData => ({
-  version: 1,
+  version: 2,
   accounts: [],
   transactions: [],
   recurrences: [],

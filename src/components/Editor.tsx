@@ -11,6 +11,7 @@ import {
   type FinanceData,
   type Recurrence,
   type Source,
+  type Transaction,
 } from "../domain/types";
 import { parseMoney, today, withRecurrenceAmount } from "../domain/finance";
 import { Icon } from "./Icon";
@@ -36,6 +37,11 @@ export type EditorSpec = {
     | "fx";
   id?: string;
   kind?: "income" | "expense" | "transfer";
+  /** Prefills a transaction editor from a not-yet-persisted occurrence (a virtual planned
+   * projection from `transactionsForMonth`, not yet in `data.transactions`) instead of the
+   * usual lookup by `id`. Used to open "Marquer payé/reçu" with the settlement date visible
+   * and editable before it is actually saved, rather than writing it silently on click. */
+  transaction?: Transaction;
 };
 const titles = {
   transaction: "Une opération",
@@ -65,9 +71,30 @@ export default function Editor({
       data.transactions.find((t) => t.id === spec.id)?.kind ||
       "expense",
   );
+  // recurrenceType "income" only applies to kind "income" (validation.ts enforces it), so it
+  // is derived from recurrenceKind rather than stored directly — storing it directly and
+  // forcing it to "income" while kind is income would overwrite whatever the user had chosen
+  // on the expense side, losing it for good on the next switch back. Keeping the expense-side
+  // choice in its own state means a Dépense → Revenu → Dépense round trip never loses it.
+  const [recurrenceKind, setRecurrenceKind] = useState<"income" | "expense">(
+    data.recurrences.find((r) => r.id === spec.id)?.kind ?? "expense",
+  );
+  const [expenseRecurrenceType, setExpenseRecurrenceType] = useState<
+    Exclude<Recurrence["recurrenceType"], "income">
+  >(() => {
+    const existing = data.recurrences.find((r) => r.id === spec.id)
+      ?.recurrenceType;
+    return existing && existing !== "income" ? existing : "subscription";
+  });
+  const recurrenceType: Recurrence["recurrenceType"] =
+    recurrenceKind === "income" ? "income" : expenseRecurrenceType;
   const item =
     spec.type === "transaction"
-      ? data.transactions.find((i) => i.id === spec.id)
+      ? // spec.transaction must win: it carries the caller's explicit intent (e.g.
+        // markSettled's status:"settled", date:today()) even when the same id already
+        // has a persisted, stale record — the pencil/edit action never sets this field,
+        // so it is unaffected and still resolves the persisted record as before.
+        (spec.transaction ?? data.transactions.find((i) => i.id === spec.id))
       : spec.type === "account" || spec.type === "balance"
         ? data.accounts.find((i) => i.id === spec.id)
         : spec.type === "goal"
@@ -316,6 +343,7 @@ export default function Editor({
           id,
           label: get("label"),
           kind: get("kind") as "income" | "expense",
+          recurrenceType: get("recurrenceType") as Recurrence["recurrenceType"],
           amountMinor: amounts.amountMinor,
           amountEffectiveFrom: amounts.amountEffectiveFrom,
           amountHistory: amounts.amountHistory,
@@ -461,8 +489,20 @@ export default function Editor({
                 defaultValue: val("status", "planned"),
                 children: (
                   <>
-                    <option value="planned">Prévu</option>
-                    <option value="settled">Payé / reçu, confirmé</option>
+                    <option value="planned">
+                      {kind === "income"
+                        ? "Pas encore reçu"
+                        : kind === "expense"
+                          ? "Pas encore payé"
+                          : "Prévu"}
+                    </option>
+                    <option value="settled">
+                      {kind === "income"
+                        ? "Reçu"
+                        : kind === "expense"
+                          ? "Payé"
+                          : "Réglé"}
+                    </option>
                     <option value="unknown">À vérifier</option>
                   </>
                 ),
@@ -567,13 +607,38 @@ export default function Editor({
             <>
               {field("Libellé", "label", { required: true })}
               {field("Type", "kind", {
-                defaultValue: val("kind", "expense"),
+                value: recurrenceKind,
+                onChange: (e) =>
+                  setRecurrenceKind(e.target.value as "income" | "expense"),
                 children: (
                   <>
                     <option value="expense">Dépense</option>
                     <option value="income">Revenu</option>
                   </>
                 ),
+              })}
+              {field("Nature", "recurrenceType", {
+                value: recurrenceType,
+                onChange: (e) =>
+                  setExpenseRecurrenceType(
+                    e.target.value as Exclude<
+                      Recurrence["recurrenceType"],
+                      "income"
+                    >,
+                  ),
+                children:
+                  recurrenceKind === "income" ? (
+                    <option value="income">Revenu récurrent</option>
+                  ) : (
+                    <>
+                      <option value="subscription">Abonnement</option>
+                      <option value="bill">
+                        Charge (loyer, assurance…)
+                      </option>
+                      <option value="saving">Épargne / mise de côté</option>
+                      <option value="other">Autre à vérifier</option>
+                    </>
+                  ),
               })}
               {field("Montant", "amountMinor", {
                 defaultValue: amount("amountMinor"),

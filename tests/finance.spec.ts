@@ -258,9 +258,7 @@ test("daily entries: income, currency-synced transfer, recurrence, investment-on
   await dialog
     .getByLabel("Compte", { exact: true })
     .selectOption({ label: "Compte principal test · CHF" });
-  await dialog
-    .getByLabel("État", { exact: true })
-    .selectOption({ label: "Payé / reçu, confirmé" });
+  await dialog.getByLabel("État", { exact: true }).selectOption({ label: "Reçu" });
   await dialog
     .getByRole("button", { name: "Enregistrer", exact: true })
     .click();
@@ -291,12 +289,22 @@ test("daily entries: income, currency-synced transfer, recurrence, investment-on
   ).toBeVisible();
 
   // 2) Recurrence: currency prefilled from the chosen account, no duplicate entry.
-  await nav.getByRole("button", { name: "Mon mois", exact: true }).click();
-  await page
-    .getByRole("button", { name: "Ajouter une récurrence", exact: true })
-    .click();
+  // Created and edited from the dedicated Abonnements page, which owns recurrence
+  // management; Mon mois only previews active recurrences and links out to it.
+  await nav.getByRole("button", { name: "Abonnements", exact: true }).click();
+  await page.getByRole("button", { name: "Ajouter", exact: true }).click();
   dialog = page.getByRole("dialog");
   await dialog.getByLabel("Libellé", { exact: true }).fill("Assurance test");
+  // Nature must survive a Type round trip: choosing "Charge" and then switching
+  // Type to Revenu and back to Dépense must not silently fall back to "Abonnement".
+  await dialog
+    .getByLabel("Nature", { exact: true })
+    .selectOption("bill");
+  await dialog.getByLabel("Type", { exact: true }).selectOption("income");
+  await dialog.getByLabel("Type", { exact: true }).selectOption("expense");
+  await expect(dialog.getByLabel("Nature", { exact: true })).toHaveValue(
+    "bill",
+  );
   await dialog.getByLabel("Montant", { exact: true }).fill("45");
   await dialog
     .getByLabel("Compte", { exact: true })
@@ -306,6 +314,10 @@ test("daily entries: income, currency-synced transfer, recurrence, investment-on
   );
   await dialog.getByLabel("Catégorie", { exact: true }).fill("Assurances");
   await dialog.getByLabel("Jour du mois", { exact: true }).fill("15");
+  // A start date safely before this month's day 15 guarantees this month's occurrence
+  // exists regardless of which day "today" actually is when the suite runs (defaulting
+  // to today would often push the start past the 15th and skip this month entirely).
+  await dialog.getByLabel("Début", { exact: true }).fill("2026-01-01");
   await dialog
     .getByRole("button", { name: "Enregistrer", exact: true })
     .click();
@@ -313,6 +325,98 @@ test("daily entries: income, currency-synced transfer, recurrence, investment-on
   await expect(
     page.getByText("Assurance test", { exact: false }).first(),
   ).toBeVisible();
+  // Reopening confirms "bill" was actually saved, not just held in form state.
+  await page
+    .getByRole("button", { name: "Modifier Assurance test", exact: true })
+    .click();
+  dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("Nature", { exact: true })).toHaveValue(
+    "bill",
+  );
+  await dialog.getByRole("button", { name: "Fermer" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+
+  // 2bis) Statuts explicites : "Marquer payé" ouvre l'éditeur avec la date de règlement
+  // visible et modifiable (pas d'écriture silencieuse), "Remettre à payer" revient en
+  // arrière sans effacer la trace du règlement précédent. Exercised from Mon mois' own
+  // transactions list (the "flux réalisé" side), independent of the Abonnements page.
+  await nav.getByRole("button", { name: "Mon mois", exact: true }).click();
+  const occurrenceRow = page
+    .locator(".row", { hasText: "Assurance test" })
+    .filter({ hasNotText: "tous les" });
+  await expect(occurrenceRow).toContainText("Pas encore payé");
+  await occurrenceRow
+    .getByRole("button", { name: "Marquer payé", exact: true })
+    .click();
+  dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("Libellé", { exact: true })).toHaveValue(
+    "Assurance test",
+  );
+  await expect(dialog.getByLabel("État", { exact: true })).toHaveValue(
+    "settled",
+  );
+  await expect(
+    dialog.getByLabel("Date de l’opération ou échéance", { exact: true }),
+  ).not.toHaveValue("");
+  await dialog
+    .getByRole("button", { name: "Enregistrer", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(occurrenceRow).toContainText("Payé");
+  await expect(occurrenceRow).not.toContainText("Pas encore payé");
+  page.once("dialog", (d) => d.accept());
+  await occurrenceRow
+    .getByRole("button", { name: "Remettre à payer Assurance test", exact: true })
+    .click();
+  await expect(occurrenceRow).toContainText("Pas encore payé");
+  // Regression: the occurrence is now a persisted transaction (status "planned"), not a
+  // virtual one anymore. Clicking "Marquer payé" a second time must still open the editor
+  // pre-filled to settled/today — spec.transaction must win over the stale persisted
+  // record, not the other way around (see EditorSpec.transaction in Editor.tsx).
+  await occurrenceRow
+    .getByRole("button", { name: "Marquer payé", exact: true })
+    .click();
+  dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("État", { exact: true })).toHaveValue("settled");
+  await expect(
+    dialog.getByLabel("Date de l’opération ou échéance", { exact: true }),
+  ).not.toHaveValue("");
+  await dialog
+    .getByRole("button", { name: "Enregistrer", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(occurrenceRow).toContainText("Payé");
+  await expect(occurrenceRow).not.toContainText("Pas encore payé");
+
+  // 2ter) Même régression pour une opération ponctuelle déjà persistée dès sa création
+  // (pas liée à une récurrence) : "Marquer payé" doit aussi la préremplir correctement.
+  await page.getByRole("button", { name: "Ajouter", exact: true }).click();
+  dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Libellé").fill("Café test");
+  await dialog.getByLabel("Montant", { exact: true }).fill("6");
+  await dialog
+    .getByLabel("Compte", { exact: true })
+    .selectOption({ label: "Compte principal test · CHF" });
+  await dialog
+    .getByRole("button", { name: "Enregistrer", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  const oneOffRow = page.locator(".row", { hasText: "Café test" });
+  await expect(oneOffRow).toContainText("Pas encore payé");
+  await oneOffRow
+    .getByRole("button", { name: "Marquer payé", exact: true })
+    .click();
+  dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("État", { exact: true })).toHaveValue("settled");
+  await expect(
+    dialog.getByLabel("Date de l’opération ou échéance", { exact: true }),
+  ).not.toHaveValue("");
+  await dialog
+    .getByRole("button", { name: "Enregistrer", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(oneOffRow).toContainText("Payé");
+  await expect(oneOffRow).not.toContainText("Pas encore payé");
 
   // 3) Transfer between two accounts of different currencies: source account is required,
   // currency is deduced from it, and the destination amount is required across currencies.
@@ -506,5 +610,308 @@ test("restore an older backup: refused with an explicit confirmation, cancel cha
     page.getByText("Compte récent fictif", { exact: true }),
   ).toHaveCount(0);
 
+  expect(errors).toEqual([]);
+});
+
+test("month picker: French Janvier–Décembre row, year navigation, Ce mois-ci shortcut", async ({
+  page,
+}) => {
+  const monthPassphrase = "Exemple-test-Finance-mois-2026";
+  const monthNames = [
+    "Janvier",
+    "Février",
+    "Mars",
+    "Avril",
+    "Mai",
+    "Juin",
+    "Juillet",
+    "Août",
+    "Septembre",
+    "Octobre",
+    "Novembre",
+    "Décembre",
+  ];
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonthName = monthNames[now.getMonth()];
+  // 6 months away is always a different month regardless of when the suite runs.
+  const otherMonthName = monthNames[(now.getMonth() + 6) % 12];
+
+  await page.goto("/");
+  await page.getByLabel("Phrase secrète", { exact: true }).fill(monthPassphrase);
+  await page.getByLabel("Confirmer la phrase secrète").fill(monthPassphrase);
+  await page.getByRole("button", { name: "Créer mon coffre" }).click();
+
+  const currentChip = page.getByRole("button", { name: currentMonthName, exact: true });
+  await expect(currentChip).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText(String(currentYear), { exact: true })).toBeVisible();
+  // The current month is selected by default: no "back to this month" shortcut needed yet.
+  await expect(page.getByRole("button", { name: "Ce mois-ci" })).toHaveCount(0);
+  // A plain <div> with just aria-label has no accessible name (generic role strips it) —
+  // role="group" is what actually exposes "Choisir un mois" to assistive tech.
+  await expect(
+    page.getByRole("group", { name: "Choisir un mois", exact: true }),
+  ).toBeVisible();
+
+  // Distinct, disambiguated short labels: a naive slice(0, 3) would show "Jui" for both.
+  await expect(
+    page.getByRole("button", { name: "Juin", exact: true }),
+  ).toHaveText("Jun");
+  await expect(
+    page.getByRole("button", { name: "Juillet", exact: true }),
+  ).toHaveText("Jul");
+
+  // Selecting another month updates the pressed chip and reveals the "back to today" shortcut.
+  await page.getByRole("button", { name: otherMonthName, exact: true }).click();
+  await expect(currentChip).toHaveAttribute("aria-pressed", "false");
+  await expect(
+    page.getByRole("button", { name: otherMonthName, exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  const backToToday = page.getByRole("button", { name: "Ce mois-ci" });
+  await expect(backToToday).toBeVisible();
+
+  // Year navigation keeps the same month number and stays reachable from any month.
+  await page.getByRole("button", { name: "Année suivante" }).click();
+  await expect(page.getByText(String(currentYear + 1), { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: otherMonthName, exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Année précédente" }).click();
+  await expect(page.getByText(String(currentYear), { exact: true })).toBeVisible();
+
+  // The shortcut returns exactly to today's month and then disappears.
+  await backToToday.click();
+  await expect(currentChip).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Ce mois-ci" })).toHaveCount(0);
+});
+
+// abonnements.md, "Vérifications obligatoires": "Le parcours navigateur doit vérifier qu'un
+// statut changé sur Abonnements met à jour Mon mois et l'Accueil après rechargement et
+// déverrouillage, sans doublon." — exercised here specifically from the Abonnements page's own
+// "Marquer payé" action, distinct from the equivalent action already covered on Mon mois by the
+// "daily entries" test above.
+test("subscriptions: a status change made on Abonnements updates Mon mois and Accueil, no duplicate, survives reload", async ({
+  page,
+}) => {
+  const subsPassphrase = "Exemple-test-Finance-abonnements-2026";
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/");
+  await page.getByLabel("Phrase secrète", { exact: true }).fill(subsPassphrase);
+  await page.getByLabel("Confirmer la phrase secrète").fill(subsPassphrase);
+  await page.getByRole("button", { name: "Créer mon coffre" }).click();
+  const nav = page.getByRole("navigation", {
+    name: "Navigation principale",
+    exact: true,
+  });
+
+  await nav.getByRole("button", { name: "Mes comptes", exact: true }).click();
+  await page.getByRole("button", { name: "Ajouter", exact: true }).click();
+  let dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Nom du compte").fill("Compte abonnements test");
+  await dialog.getByLabel("Établissement").fill("Banque Fictive");
+  await dialog
+    .getByRole("button", { name: "Enregistrer", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+
+  // Day 1, monthly, started well in the past: due every month regardless of run date.
+  await nav.getByRole("button", { name: "Abonnements", exact: true }).click();
+  await page.getByRole("button", { name: "Ajouter", exact: true }).click();
+  dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Libellé", { exact: true }).fill("Charge test abo");
+  await dialog.getByLabel("Nature", { exact: true }).selectOption("bill");
+  await dialog.getByLabel("Montant", { exact: true }).fill("77.70");
+  await dialog
+    .getByLabel("Compte", { exact: true })
+    .selectOption({ label: "Compte abonnements test · CHF" });
+  await dialog.getByLabel("Catégorie", { exact: true }).fill("Test");
+  await dialog.getByLabel("Jour du mois", { exact: true }).fill("1");
+  await dialog.getByLabel("Début", { exact: true }).fill("2020-01-01");
+  await dialog
+    .getByRole("button", { name: "Enregistrer", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+
+  // A single row per recurrence on Abonnements: cadence and status share it, unlike Mon mois'
+  // separate "opérations" and "aperçu" rows, so no "tous les" filter is needed here.
+  const subsRow = page.locator(".row", { hasText: "Charge test abo" });
+  await expect(subsRow).toContainText("Pas encore payé");
+  const resteDu = page
+    .locator(".stat-card", { hasText: "Reste dû" })
+    .locator(".metric-value");
+  await expect(resteDu).toContainText("77.70");
+
+  // Mark it paid from Abonnements itself, not from Mon mois.
+  await subsRow
+    .getByRole("button", { name: "Marquer payé", exact: true })
+    .click();
+  dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("État", { exact: true })).toHaveValue(
+    "settled",
+  );
+  await expect(
+    dialog.getByLabel("Date de l’opération ou échéance", { exact: true }),
+  ).not.toHaveValue("");
+  await dialog
+    .getByRole("button", { name: "Enregistrer", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(subsRow).toContainText("Payé");
+  await expect(subsRow).not.toContainText("Pas encore payé");
+  await expect(resteDu).toContainText("0.00");
+
+  // Mon mois: exactly one row for the occurrence itself (excluding the separate recurrence
+  // preview row, which also mentions "tous les") — no duplicate transaction was created.
+  await nav.getByRole("button", { name: "Mon mois", exact: true }).click();
+  const monthOccurrenceRow = page
+    .locator(".row", { hasText: "Charge test abo" })
+    .filter({ hasNotText: "tous les" });
+  await expect(monthOccurrenceRow).toHaveCount(1);
+  await expect(monthOccurrenceRow).toContainText("Payé");
+
+  // Accueil: the settlement is reflected in the month's confirmed figures.
+  await nav.getByRole("button", { name: "Vue d’ensemble", exact: true }).click();
+  const expensesConfirmed = page
+    .locator(".metric", { hasText: "Dépenses confirmées" })
+    .locator(".metric-value");
+  await expect(expensesConfirmed).toContainText("77.70");
+
+  // Reload and unlock: everything above survives, still no duplicate.
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Ouvrir mon espace" }),
+  ).toBeVisible();
+  await page.getByLabel("Phrase secrète", { exact: true }).fill(subsPassphrase);
+  await page
+    .getByRole("button", { name: "Déverrouiller", exact: true })
+    .click();
+  // Overview's own <h1> reads "Une vue sur l'essentiel.", not "Vue d'ensemble" (see App.tsx's
+  // page-title ternary) — lands there by default since `page` state resets to "overview" on
+  // every fresh mount, unlock included.
+  await expect(
+    page.getByRole("heading", { name: "Une vue sur l’essentiel.", exact: true }),
+  ).toBeVisible();
+  await expect(expensesConfirmed).toContainText("77.70");
+  await nav.getByRole("button", { name: "Mon mois", exact: true }).click();
+  await expect(monthOccurrenceRow).toHaveCount(1);
+  await expect(monthOccurrenceRow).toContainText("Payé");
+  await nav.getByRole("button", { name: "Abonnements", exact: true }).click();
+  await expect(subsRow).toContainText("Payé");
+  await expect(resteDu).toContainText("0.00");
+
+  expect(errors).toEqual([]);
+});
+
+// Regression: a single very long word (no spaces) in an account or institution name overflowed
+// the page horizontally once the grid's last column had no blank cells left to absorb it —
+// .institution and the account-head <h3> had no overflow-wrap, unlike .balance. Six accounts
+// fill all three .account-grid columns at desktop width, which is what actually triggers it;
+// a lone account does not (the overflow bleeds into empty grid cells instead of the viewport).
+test("accounts: an unbroken long institution name wraps instead of overflowing the page", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/");
+  await page.getByLabel("Phrase secrète", { exact: true }).fill("Exemple-test-Finance-debordement-2026");
+  await page
+    .getByLabel("Confirmer la phrase secrète")
+    .fill("Exemple-test-Finance-debordement-2026");
+  await page.getByRole("button", { name: "Créer mon coffre" }).click();
+  await page
+    .getByRole("navigation", { name: "Navigation principale", exact: true })
+    .getByRole("button", { name: "Mes comptes", exact: true })
+    .click();
+  const longWord = "Établissementfinancierfictifinternationalsansespaceaucun";
+  for (const label of ["A", "B", "C", "D", "E", "F"]) {
+    await page.getByRole("button", { name: "Ajouter", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("Nom du compte").fill(`Compte ${label}`);
+    await dialog.getByLabel("Établissement").fill(longWord);
+    await dialog
+      .getByRole("button", { name: "Enregistrer", exact: true })
+      .click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+  }
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+// Regression: same class of bug as the account/institution one above, in a different element.
+// .review-item p (Documents et réglages, carte "Informations à vérifier") had no overflow-wrap,
+// unlike .review-item h3 (now covered by the generic h1/h2/h3 rule). A ReviewItem's `reason` is
+// free imported text (up to 8000 characters, src/domain/validation.ts) and can contain a single
+// unbroken long word. Unlike the account grid (three narrow columns), this card is full width
+// on its own line at desktop width, so a single ~80-character word still fits without wrapping —
+// it takes a much longer unbroken run (a plausible worst case for pasted/malformed import text)
+// to actually push past the container and overflow the page.
+test("review items: an unbroken long reason from an import wraps instead of overflowing the page", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/");
+  await page
+    .getByLabel("Phrase secrète", { exact: true })
+    .fill("Exemple-test-Finance-review-debordement-2026");
+  await page
+    .getByLabel("Confirmer la phrase secrète")
+    .fill("Exemple-test-Finance-review-debordement-2026");
+  await page.getByRole("button", { name: "Créer mon coffre" }).click();
+
+  const longWord =
+    "Informationimporteesansespacequidoitpasfairedeborderlapagecarcestunmottresslong".repeat(
+      4,
+    );
+  const payload = JSON.stringify({
+    version: 2,
+    accounts: [],
+    transactions: [],
+    recurrences: [],
+    goals: [],
+    positions: [],
+    documents: [],
+    fxRates: [],
+    reviewItems: [
+      {
+        id: "review-long-reason",
+        title: "Élément à vérifier",
+        reason: longWord,
+        source: { system: "import" },
+      },
+    ],
+    preferences: { baseCurrency: "CHF", locale: "fr-CH" },
+  });
+  await page
+    .getByRole("navigation", { name: "Navigation principale", exact: true })
+    .getByRole("button", { name: "Documents et réglages", exact: true })
+    .click();
+  await page
+    .locator('input[type="file"][accept=".json,.csv"]')
+    .setInputFiles({
+      name: "import-fictif.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(payload),
+    });
+  await expect(
+    page.getByText("Vérifier cet import", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Confirmer l’import", exact: true })
+    .click();
+  await expect(
+    page.getByText("Vérifier cet import", { exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByText(longWord, { exact: false })).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
   expect(errors).toEqual([]);
 });

@@ -11,15 +11,25 @@ import {
   emptyData,
   type FinanceData,
   type Account,
+  type Recurrence,
   type Source,
   type Transaction,
 } from "./domain/types";
 import {
   availableSummary,
+  cohortSummary,
+  convertMinor,
   latestBalance,
   money,
   monthLabel,
   monthSummary,
+  monthlyEquivalentMinor,
+  nextOccurrenceDate,
+  occurrenceCohort,
+  rankAccounts,
+  rankByValue,
+  recurrenceAmountAt,
+  recurringFlowSummary,
   today,
   transactionsForMonth,
   wealthSummary,
@@ -35,13 +45,20 @@ import {
 } from "./vault";
 import { demoData } from "./demo";
 import { parseTransactionCsv, CSV_TEMPLATE } from "./importCsv";
-import { Icon } from "./components/Icon";
+import { Icon, type IconName } from "./components/Icon";
 import { Allocation, FlowChart, WealthChart } from "./components/Charts";
 import Editor, { type EditorSpec } from "./components/Editor";
+import { MonthPicker } from "./components/MonthPicker";
 const pages = [
   { id: "overview", name: "Vue d’ensemble", short: "Accueil", icon: "home" },
   { id: "month", name: "Mon mois", short: "Mon mois", icon: "calendar" },
   { id: "accounts", name: "Mes comptes", short: "Comptes", icon: "wallet" },
+  {
+    id: "subscriptions",
+    name: "Abonnements",
+    short: "Abonnements",
+    icon: "refresh",
+  },
   { id: "goals", name: "Épargne et projets", short: "Projets", icon: "target" },
   {
     id: "investments",
@@ -64,6 +81,33 @@ function download(raw: string, name: string, type = "application/json") {
   a.download = name;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+// Local, deterministic identity for an establishment or a security, wherever the app shows a
+// short monogram instead of a real logo: identite-ui.md rules out fetching a real bank logo at
+// render time (it would reveal which establishments are consulted and depend on a third party)
+// and there is no verified-rights logo/pictogram registry to draw from here — so the fallback
+// is a locally generated monogram, with initials that reflect a multi-word name instead of a
+// naive slice(0, 2) ("Banque Fictive" → "BF", not "BA"), and a stable color from a small
+// palette within the app's own blue-violet accent family (never an arbitrary hue) so entries
+// read as visually distinct in a list, per docs/AUDIT_UI_V2.md.
+function monogramInitials(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  return (
+    words.length > 1 ? words[0][0] + words[1][0] : name.replace(/\s+/g, "").slice(0, 2)
+  ).toUpperCase();
+}
+const MONOGRAM_PALETTE = [
+  { bg: "rgba(138, 169, 255, 0.16)", fg: "#8aa9ff" },
+  { bg: "rgba(170, 150, 255, 0.16)", fg: "#aa96ff" },
+  { bg: "rgba(111, 151, 224, 0.16)", fg: "#6f97e0" },
+  { bg: "rgba(124, 140, 255, 0.16)", fg: "#7c8cff" },
+  { bg: "rgba(200, 150, 230, 0.16)", fg: "#c896e6" },
+  { bg: "rgba(160, 180, 200, 0.16)", fg: "#c0ceef" },
+];
+function monogramColors(name: string): { bg: string; fg: string } {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  return MONOGRAM_PALETTE[hash % MONOGRAM_PALETTE.length];
 }
 function SourceLink({ source }: { source: Source }) {
   return source.url && /^https:\/\/(www\.)?notion\.so\//.test(source.url) ? (
@@ -402,6 +446,8 @@ export default function App() {
     [message, setMessage] = useState(""),
     [error, setError] = useState(""),
     [filter, setFilter] = useState("all"),
+    [subsStatus, setSubsStatus] = useState<"all" | "due" | "settled">("all"),
+    [subsSort, setSubsSort] = useState<"amount" | "next">("amount"),
     [more, setMore] = useState(false),
     [pendingImport, setPendingImport] = useState<FinanceData | null>(null),
     [busy, setBusy] = useState(false),
@@ -465,6 +511,8 @@ export default function App() {
     setPage(p);
     setMore(false);
     setFilter("all");
+    setSubsStatus("all");
+    setSubsSort("amount");
     window.scrollTo({ top: 0, behavior: "instant" });
   }
   async function persist(next: FinanceData) {
@@ -603,6 +651,13 @@ export default function App() {
     );
   const available = availableSummary(data, currency, month);
   const wealth = wealthSummary(data, currency),
+    accountRanking = rankAccounts(data, currency),
+    // Largest to smallest comparable value first (docs/AUDIT_UI_V2.md), then accounts
+    // without a common rate/date — never given a guessed position among the ranked ones.
+    sortedAccounts = [
+      ...accountRanking.ranked.map((r) => r.item),
+      ...accountRanking.toValue,
+    ],
     summary = monthSummary(data, month, currency),
     transactions = transactionsForMonth(data, month),
     currentPage = pages.find((p) => p.id === page)!;
@@ -620,6 +675,106 @@ export default function App() {
     setError("");
     setEditor(spec);
   };
+  const recurrenceTypeLabels: Record<Recurrence["recurrenceType"], string> = {
+    subscription: "Abonnement",
+    bill: "Charge",
+    income: "Revenu récurrent",
+    saving: "Épargne / mise de côté",
+    other: "À vérifier",
+  };
+  // Distinct metaphor per nature (identite-ui.md), reusing existing icons where one already
+  // fits rather than inventing a lookalike: "refresh" for the repeating abonnement itself,
+  // "bank" for a fixed charge, "arrow-down" matching the same icon used for income elsewhere,
+  // "alert" matching its existing "à vérifier" meaning. Only "saving" needed a new icon
+  // ("vault"): reusing "target" (goals/projects) would collide with an unrelated concept.
+  const recurrenceTypeIcons: Record<Recurrence["recurrenceType"], IconName> = {
+    subscription: "refresh",
+    bill: "bank",
+    income: "arrow-down",
+    saving: "vault",
+    other: "alert",
+  };
+  // The cohort is keyed by recurrenceId: `occurrenceCohort` only ever produces at most one
+  // entry per active recurrence for a given month (see finance.ts), so this lookup is safe.
+  const subsCohortItems = occurrenceCohort(data, month);
+  const subsCohortByRecurrence = new Map(
+    subsCohortItems.map((i) => [i.recurrenceId, i]),
+  );
+  const subsCohort = cohortSummary(data, month, currency);
+  const subsFlow = recurringFlowSummary(data, month, currency);
+  const subsMatchesType = (r: Recurrence) =>
+    filter === "all" || r.recurrenceType === filter;
+  const subsMatchesStatus = (r: Recurrence) => {
+    if (subsStatus === "all") return true;
+    const item = subsCohortByRecurrence.get(r.id);
+    return subsStatus === "settled" ? !!item?.settled : !!item && !item.settled;
+  };
+  const subsActive = data.recurrences.filter(
+    (r) => r.active && subsMatchesType(r) && subsMatchesStatus(r),
+  );
+  const subsInactive = data.recurrences
+    .filter((r) => !r.active && subsMatchesType(r))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  // "Montant mensuel" compares recurrences that can carry different currencies, so the raw
+  // per-currency equivalent from monthlyEquivalentMinor is not comparable on its own — it must
+  // be converted to the display currency first, exactly like rankAccounts/accountValue already
+  // do for accounts. A missing rate goes to the unranked tail instead of comparing incomparable
+  // numbers or silently dropping the item.
+  const subsAmountRanking =
+    subsSort === "amount"
+      ? rankByValue(
+          subsActive,
+          (r) => {
+            const at = today();
+            const convertedMinor = convertMinor(
+              monthlyEquivalentMinor(r, at),
+              r.currency,
+              currency,
+              data.fxRates,
+              at,
+            );
+            return {
+              valueMinor: convertedMinor,
+              valuationDate: convertedMinor === null ? null : at,
+            };
+          },
+          (r) => r.id,
+        )
+      : null;
+  const subsSortedActive =
+    subsAmountRanking !== null
+      ? [
+          ...subsAmountRanking.ranked.map((v) => v.item),
+          ...subsAmountRanking.toValue,
+        ]
+      : [...subsActive].sort((a, b) => {
+          const da = nextOccurrenceDate(a),
+            db = nextOccurrenceDate(b);
+          if (da === db) return a.id.localeCompare(b.id);
+          if (da === null) return 1;
+          if (db === null) return -1;
+          return da.localeCompare(db);
+        });
+  // Prefills "Marquer payé/reçu" from a not-yet-persisted occurrence, mirroring
+  // `transactionsForMonth`'s own virtual-transaction shape and id (`recurrenceId:date`) so a
+  // settlement made here and one made from Mon mois never create two different transactions
+  // for the same occurrence.
+  function subsVirtualTransaction(r: Recurrence, dueDate: string, amountMinor: number): Transaction {
+    return {
+      id: `${r.id}:${dueDate}`,
+      label: r.label,
+      kind: r.kind,
+      amountMinor,
+      currency: r.currency,
+      status: "planned",
+      date: dueDate,
+      accountId: r.accountId,
+      category: r.category,
+      recurrenceId: r.id,
+      occurrenceDate: dueDate,
+      source: r.source,
+    };
+  }
   const kinds = {
     bank: "Compte bancaire",
     savings: "Épargne",
@@ -633,8 +788,14 @@ export default function App() {
     return (
       <article className="account-card" key={a.id}>
         <div className="account-head">
-          <span className="institution-icon">
-            {a.institution.slice(0, 2).toUpperCase()}
+          <span
+            className="institution-icon"
+            style={{
+              background: monogramColors(a.institution).bg,
+              color: monogramColors(a.institution).fg,
+            }}
+          >
+            {monogramInitials(a.institution)}
           </span>
           <div>
             <span className="institution">{a.institution}</span>
@@ -685,24 +846,70 @@ export default function App() {
       </article>
     );
   }
-  async function settle(t: Transaction) {
+  /** "Prévu" never distinguished a due expense from a due income, and gave no explicit
+   * word for the not-yet state — see docs/AUDIT_UI_V2.md. */
+  function statusWord(t: Transaction): string {
+    if (t.status === "unknown") return "À vérifier";
+    if (t.status === "settled")
+      return t.kind === "income" ? "Reçu" : t.kind === "transfer" ? "Réglé" : "Payé";
+    return t.kind === "income"
+      ? "Pas encore reçu"
+      : t.kind === "transfer"
+        ? "Prévu"
+        : "Pas encore payé";
+  }
+  // Opens the editor pre-filled to settled/today rather than writing it on click: the
+  // settlement date must stay "visible et modifiable avant validation" (see
+  // .claude/skills/finance/references/abonnements.md), not silently forced to today.
+  // `transaction` prefills the form even for a not-yet-persisted virtual occurrence,
+  // which has no entry in data.transactions for the usual by-id lookup to find.
+  function markSettled(t: Transaction) {
+    edit({
+      type: "transaction",
+      id: t.id,
+      kind: t.kind,
+      transaction: { ...t, status: "settled", date: today() },
+    });
+  }
+  // Limited to recurrence-linked occurrences: occurrenceDate is then a reliable due date
+  // to fall back to (see field comment on EditorSpec.transaction). A plain one-off
+  // transaction can still be corrected by hand through the pencil/edit action, which
+  // already exposes État as a free choice.
+  async function revertToPlanned(t: Transaction) {
     if (!data) return;
+    const verb =
+      t.kind === "income" ? "recevoir" : t.kind === "transfer" ? "régler" : "payer";
+    if (
+      !window.confirm(
+        `Remettre « ${t.label} » à ${verb} ? Le règlement du ${t.date ?? "date inconnue"} reste conservé dans l’historique, pas effacé.`,
+      )
+    )
+      return;
     try {
-      const next = {
+      const next: Transaction = {
         ...t,
-        status: "settled" as const,
-        date: today(),
-        source: { ...t.source, updatedAt: new Date().toISOString() },
+        status: "planned",
+        date: t.occurrenceDate ?? t.date,
+        source: {
+          ...t.source,
+          updatedAt: new Date().toISOString(),
+          note: [
+            t.source.note,
+            `Remis à prévu le ${new Date().toISOString()} (réglé précédemment le ${t.date ?? "date inconnue"}).`,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+        },
       };
       await persist({
         ...data,
         transactions: [...data.transactions.filter((v) => v.id !== t.id), next],
       });
       setMessage(
-        "Paiement confirmé. Actualisez le solde du compte après rapprochement.",
+        "Remis à prévu. L’ancienne date de règlement reste dans l’historique.",
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Paiement non enregistré.");
+      setError(e instanceof Error ? e.message : "Correction non enregistrée.");
     }
   }
   function transactionRow(t: Transaction) {
@@ -728,12 +935,7 @@ export default function App() {
               (t.budgetMonth
                 ? monthLabel(t.budgetMonth) + " · jour à vérifier"
                 : "Date à vérifier")}{" "}
-            · {accountName(t.accountId)} ·{" "}
-            {t.status === "settled"
-              ? "Confirmé"
-              : t.status === "planned"
-                ? "Prévu"
-                : "À vérifier"}
+            · {accountName(t.accountId)} · {statusWord(t)}
             {data?.documents.some((d) => d.transactionId === t.id) &&
               " · Justificatif joint"}
           </span>
@@ -743,22 +945,25 @@ export default function App() {
           {display(t.amountMinor, t.currency)}
         </span>
         {t.status === "planned" ? (
-          <button
-            className="icon-button"
-            title="Confirmer le paiement aujourd’hui"
-            aria-label={`Confirmer ${t.label}`}
-            onClick={() => settle(t)}
-          >
-            <Icon name="check" size={17} />
+          <button className="button small secondary" onClick={() => markSettled(t)}>
+            <Icon name="check" size={16} />
+            {t.kind === "income"
+              ? "Marquer reçu"
+              : t.kind === "transfer"
+                ? "Marquer réglé"
+                : "Marquer payé"}
           </button>
         ) : null}
         {data?.transactions.some((i) => i.id === t.id) && (
           <>
             {
-              // Kept exclusive with the "confirmer" action above so a row never carries
-              // three icon buttons at once (crowds the label on an iPhone width). A
-              // receipt is also most often at hand once the operation is settled; a
-              // planned operation can still be reached from Documents et réglages.
+              // Kept exclusive with the "marquer" action above so a planned row never
+              // crowds two actions (the label wraps on an iPhone width). A receipt is
+              // also most often at hand once the operation is settled; a planned
+              // operation can still be reached from Documents et réglages. The
+              // correction action below adds a third icon-button only for the narrower
+              // recurrence-linked case — accepted for now, to revisit with the row
+              // density rework of V2.5.
               t.status !== "planned" && (
                 <label
                   className="icon-button"
@@ -774,6 +979,22 @@ export default function App() {
                 </label>
               )
             }
+            {t.status === "settled" && t.recurrenceId && t.occurrenceDate && (
+              <button
+                className="icon-button"
+                title="Corriger : remettre à prévu"
+                aria-label={`${
+                  t.kind === "income"
+                    ? "Remettre à recevoir"
+                    : t.kind === "transfer"
+                      ? "Remettre à régler"
+                      : "Remettre à payer"
+                } ${t.label}`}
+                onClick={() => revertToPlanned(t)}
+              >
+                <Icon name="refresh" size={17} />
+              </button>
+            )}
             <button
               className="icon-button"
               aria-label={`Modifier ${t.label}`}
@@ -785,6 +1006,94 @@ export default function App() {
             </button>
           </>
         )}
+      </div>
+    );
+  }
+  function subscriptionRow(r: Recurrence) {
+    const cohortItem = subsCohortByRecurrence.get(r.id);
+    const settledTxn = cohortItem?.settled
+      ? data?.transactions.find((t) => t.id === cohortItem.settled!.transactionId)
+      : undefined;
+    const dueTxn =
+      cohortItem && !cohortItem.settled
+        ? subsVirtualTransaction(r, cohortItem.occurrenceDate, cohortItem.dueAmountMinor)
+        : null;
+    const nextDate = r.active ? nextOccurrenceDate(r) : null;
+    const nextAmount = nextDate ? recurrenceAmountAt(r, nextDate) : null;
+    const monthlyEquiv = r.intervalMonths > 1 ? monthlyEquivalentMinor(r) : null;
+    return (
+      <div className="row" key={r.id}>
+        <span className="row-icon">
+          <Icon name={recurrenceTypeIcons[r.recurrenceType]} />
+        </span>
+        <div className="row-main">
+          <span className="row-title">{r.label}</span>
+          <span className="row-detail">
+            {recurrenceTypeLabels[r.recurrenceType]} · Le {r.day} ·{" "}
+            {r.intervalMonths === 1 ? "tous les mois" : `tous les ${r.intervalMonths} mois`}{" "}
+            · {accountName(r.accountId)}
+          </span>
+          <span className="row-detail">
+            {!r.active
+              ? r.endDate
+                ? `Terminé le ${r.endDate}`
+                : "En pause"
+              : cohortItem
+                ? cohortItem.settled
+                  ? `${r.kind === "income" ? "Reçu" : "Payé"} le ${
+                      cohortItem.settled.date ?? "date inconnue"
+                    }${
+                      cohortItem.settled.date &&
+                      cohortItem.settled.date.slice(0, 7) !== month
+                        ? " · hors du mois sélectionné"
+                        : ""
+                    }`
+                  : r.kind === "income"
+                    ? "Pas encore reçu"
+                    : "Pas encore payé"
+                : "Aucune échéance ce mois-ci"}
+          </span>
+        </div>
+        <div className="row-value">
+          {nextDate ? (
+            <>
+              {display(nextAmount, r.currency)}
+              <span className="row-detail">Prochaine échéance : {nextDate}</span>
+              {monthlyEquiv !== null && (
+                <span className="row-detail">
+                  ≈ {display(monthlyEquiv, r.currency)}/mois
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="row-detail">Aucune échéance à venir</span>
+          )}
+        </div>
+        {dueTxn && (
+          <button className="button small secondary" onClick={() => markSettled(dueTxn)}>
+            <Icon name="check" size={16} />
+            {r.kind === "income" ? "Marquer reçu" : "Marquer payé"}
+          </button>
+        )}
+        {settledTxn && (
+          <button
+            className="icon-button"
+            title="Corriger : remettre à prévu"
+            aria-label={`${
+              r.kind === "income" ? "Remettre à recevoir" : "Remettre à payer"
+            } ${r.label}`}
+            onClick={() => revertToPlanned(settledTxn)}
+          >
+            <Icon name="refresh" size={17} />
+          </button>
+        )}
+        <button
+          className="icon-button"
+          aria-label={`Modifier ${r.label}`}
+          onClick={() => edit({ type: "recurrence", id: r.id })}
+        >
+          <Icon name="edit" size={17} />
+        </button>
       </div>
     );
   }
@@ -921,9 +1230,11 @@ export default function App() {
                   ? "Ce qui entre, ce qui sort et ce qui reste à prévoir."
                   : page === "accounts"
                     ? "Chaque compte, avec sa devise et la date de son solde."
-                    : page === "goals"
-                      ? "Donnez une place à ce qui compte pour vous."
-                      : page === "investments"
+                    : page === "subscriptions"
+                      ? "Ce qui est dû ce mois-ci, ce qui est réglé et ce qui reste."
+                      : page === "goals"
+                        ? "Donnez une place à ce qui compte pour vous."
+                        : page === "investments"
                         ? "Vos positions, rattachées à leurs comptes."
                         : "Vos pièces et vos données, à portée de main."}
             </p>
@@ -935,11 +1246,13 @@ export default function App() {
                 type:
                   page === "accounts"
                     ? "account"
-                    : page === "goals"
-                      ? "goal"
-                      : page === "investments"
-                        ? "position"
-                        : "transaction",
+                    : page === "subscriptions"
+                      ? "recurrence"
+                      : page === "goals"
+                        ? "goal"
+                        : page === "investments"
+                          ? "position"
+                          : "transaction",
               })
             }
           >
@@ -966,16 +1279,11 @@ export default function App() {
           </div>
         )}
         <div className="period-bar">
-          <label className="month-picker">
-            <Icon name="calendar" size={18} />
-            <span className="sr-only">Mois</span>
-            <input
-              type="month"
-              aria-label="Mois"
-              value={month}
-              onChange={(e) => e.target.value && setMonth(e.target.value)}
-            />
-          </label>
+          <MonthPicker
+            month={month}
+            onChange={setMonth}
+            currentMonth={today().slice(0, 7)}
+          />
           <label className="currency-picker">
             <span className="sr-only">Devise d’affichage</span>
             <select
@@ -995,7 +1303,9 @@ export default function App() {
               ))}
             </select>
           </label>
-          <span className="meta">{monthLabel(month)}</span>
+          <span className="meta" aria-live="polite">
+            {monthLabel(month)}
+          </span>
         </div>
         {page === "overview" && (
           <>
@@ -1078,7 +1388,7 @@ export default function App() {
               </button>
             </div>
             <div className="account-grid">
-              {data.accounts.slice(0, 3).map(accountCard)}
+              {sortedAccounts.slice(0, 3).map(accountCard)}
               {!data.accounts.length && (
                 <div className="empty-state">
                   <Icon name="wallet" size={30} />
@@ -1098,16 +1408,17 @@ export default function App() {
                 <Allocation
                   hidden={hidden}
                   currency={currency}
-                  items={wealth.items.flatMap((i) =>
-                    i.valueMinor === null
+                  // Ordered like sortedAccounts (largest to smallest), not wealth.items'
+                  // insertion order — docs/PLAN_AMELIORATION_V2.md also asks répartitions
+                  // to sort, not just the account list itself.
+                  items={sortedAccounts.flatMap((a) => {
+                    const valueMinor = wealth.items.find(
+                      (i) => i.accountId === a.id,
+                    )?.valueMinor;
+                    return valueMinor == null
                       ? []
-                      : [
-                          {
-                            name: accountName(i.accountId),
-                            value: i.valueMinor,
-                          },
-                        ],
-                  )}
+                      : [{ name: accountName(a.id), value: valueMinor }];
+                  })}
                 />
                 <p className="footer-note">
                   Actifs positifs uniquement. Dettes déduites du patrimoine
@@ -1279,41 +1590,36 @@ export default function App() {
               )}
             </Card>
             <Card
-              title="Charges récurrentes"
+              title="Abonnements et charges récurrentes"
               action={
                 <button
                   className="card-action"
-                  onClick={() => edit({ type: "recurrence" })}
+                  onClick={() => navigate("subscriptions")}
                 >
-                  Ajouter une récurrence
+                  Voir tout <Icon name="chevron-right" size={16} />
                 </button>
               }
             >
-              {data.recurrences.map((r) => (
-                <div className="row" key={r.id}>
-                  <span className="row-icon">
-                    <Icon name="refresh" />
-                  </span>
-                  <div className="row-main">
-                    <span className="row-title">{r.label}</span>
-                    <span className="row-detail">
-                      Le {r.day} · tous les {r.intervalMonths} mois ·{" "}
-                      {r.active ? "active" : "en pause"}
+              {data.recurrences
+                .filter((r) => r.active)
+                .slice(0, 4)
+                .map((r) => (
+                  <div className="row" key={r.id}>
+                    <span className="row-icon">
+                      <Icon name={recurrenceTypeIcons[r.recurrenceType]} />
+                    </span>
+                    <div className="row-main">
+                      <span className="row-title">{r.label}</span>
+                      <span className="row-detail">
+                        Le {r.day} · tous les {r.intervalMonths} mois
+                      </span>
+                    </div>
+                    <span className="row-value">
+                      {display(r.amountMinor, r.currency)}
                     </span>
                   </div>
-                  <span className="row-value">
-                    {display(r.amountMinor, r.currency)}
-                  </span>
-                  <button
-                    className="icon-button"
-                    aria-label={`Modifier ${r.label}`}
-                    onClick={() => edit({ type: "recurrence", id: r.id })}
-                  >
-                    <Icon name="edit" />
-                  </button>
-                </div>
-              ))}
-              {!data.recurrences.length && (
+                ))}
+              {!data.recurrences.some((r) => r.active) && (
                 <div className="empty-state">
                   Vos abonnements et charges récurrentes apparaîtront ici.
                 </div>
@@ -1327,12 +1633,157 @@ export default function App() {
               Les soldes conservent leur date d’observation. Les opérations du
               mois ne les modifient pas automatiquement.
             </div>
-            <div className="account-grid">{data.accounts.map(accountCard)}</div>
+            <div className="account-grid">{sortedAccounts.map(accountCard)}</div>
             {!data.accounts.length && (
               <div className="empty-state">
                 Ajoutez votre premier compte ou importez un fichier Finance.
               </div>
             )}
+          </>
+        )}
+        {page === "subscriptions" && (
+          <>
+            <div className="notice">
+              Cohorte d’échéances : ce qui est dû en {monthLabel(month)}, quel
+              que soit le mois du règlement. Flux réalisé : ce qui a
+              réellement été réglé en {monthLabel(month)}, quelle que soit
+              l’échéance d’origine.
+            </div>
+            <div className="stat-grid">
+              {[
+                {
+                  label: `Dû en ${monthLabel(month)}`,
+                  value:
+                    subsCohort.dueMinor !== null
+                      ? display(subsCohort.dueMinor)
+                      : "—",
+                },
+                {
+                  label: `Réglé pour ${monthLabel(month)}`,
+                  value:
+                    subsCohort.settledMinor !== null
+                      ? display(subsCohort.settledMinor)
+                      : "—",
+                },
+                {
+                  label: "Reste dû",
+                  value:
+                    subsCohort.remainingMinor !== null
+                      ? display(subsCohort.remainingMinor)
+                      : "—",
+                },
+                {
+                  // Matches cohortSummary's activeCount exactly: every active recurrence,
+                  // any kind or classification (revenus et mises de côté compris) — the label
+                  // must not promise a narrower scope than what is actually counted.
+                  label: "Récurrences actives",
+                  value: String(subsCohort.activeCount),
+                },
+              ].map((s) => (
+                <div className="stat-card" key={s.label}>
+                  <p className="metric-label">{s.label}</p>
+                  <div className="metric-value">{s.value}</div>
+                </div>
+              ))}
+            </div>
+            {subsCohort.partial && (
+              <p className="meta">
+                {subsCohort.excluded} occurrence(s) exclue(s) du total : taux
+                de change manquant.
+              </p>
+            )}
+            <div className="stat-grid">
+              {[
+                {
+                  label: `Payé en ${monthLabel(month)}`,
+                  value:
+                    subsFlow.paidMinor !== null ? display(subsFlow.paidMinor) : "—",
+                },
+                {
+                  label: `Reçu en ${monthLabel(month)}`,
+                  value:
+                    subsFlow.receivedMinor !== null
+                      ? display(subsFlow.receivedMinor)
+                      : "—",
+                },
+              ].map((s) => (
+                <div className="stat-card" key={s.label}>
+                  <p className="metric-label">{s.label}</p>
+                  <div className="metric-value">{s.value}</div>
+                </div>
+              ))}
+            </div>
+            {subsFlow.partial && (
+              <p className="meta">
+                {subsFlow.excluded} règlement(s) exclu(s) du total : date ou
+                taux de change manquant.
+              </p>
+            )}
+            <Card title="Actifs">
+              <div className="tab-bar">
+                {[
+                  ["all", "Tous"],
+                  ["subscription", "Abonnements"],
+                  ["bill", "Charges"],
+                  ["income", "Revenus"],
+                ].map(([v, l]) => (
+                  <button
+                    key={v}
+                    className={`tab-button ${filter === v ? "active" : ""}`}
+                    onClick={() => setFilter(v)}
+                  >
+                    {l}
+                  </button>
+                ))}
+              </div>
+              <div className="tab-bar">
+                {(
+                  [
+                    ["all", "Tous les statuts"],
+                    ["settled", "Payé / Reçu"],
+                    ["due", "À payer / recevoir"],
+                  ] as const
+                ).map(([v, l]) => (
+                  <button
+                    key={v}
+                    className={`tab-button ${subsStatus === v ? "active" : ""}`}
+                    onClick={() => setSubsStatus(v)}
+                  >
+                    {l}
+                  </button>
+                ))}
+              </div>
+              <label className="currency-picker">
+                <span className="sr-only">Trier les abonnements par</span>
+                <select
+                  aria-label="Trier les abonnements par"
+                  value={subsSort}
+                  onChange={(e) =>
+                    setSubsSort(e.target.value as "amount" | "next")
+                  }
+                >
+                  <option value="amount">Trier : montant mensuel</option>
+                  <option value="next">Trier : prochaine échéance</option>
+                </select>
+              </label>
+              {subsSortedActive.map(subscriptionRow)}
+              {!subsSortedActive.length && (
+                <div className="empty-state">
+                  {data.recurrences.some((r) => r.active)
+                    ? "Aucun élément ne correspond à ces filtres."
+                    : "Vos abonnements et charges récurrentes actifs apparaîtront ici."}
+                </div>
+              )}
+            </Card>
+            <details className="account-history">
+              <summary>En pause ou terminés ({subsInactive.length})</summary>
+              {subsInactive.map(subscriptionRow)}
+              {!subsInactive.length && (
+                <p className="meta">
+                  Aucun abonnement ou charge en pause ou terminé.
+                </p>
+              )}
+            </details>
           </>
         )}
         {page === "goals" && (
@@ -1389,8 +1840,14 @@ export default function App() {
                 .filter((p) => filter === "all" || p.assetType === filter)
                 .map((p) => (
                   <div className="row" key={p.id}>
-                    <span className="institution-icon">
-                      {(p.symbol || p.name).slice(0, 2)}
+                    <span
+                      className="institution-icon"
+                      style={{
+                        background: monogramColors(p.symbol || p.name).bg,
+                        color: monogramColors(p.symbol || p.name).fg,
+                      }}
+                    >
+                      {monogramInitials(p.symbol || p.name)}
                     </span>
                     <div className="row-main">
                       <span className="row-title">
@@ -1423,7 +1880,7 @@ export default function App() {
               )}
             </Card>
             <div className="account-grid">
-              {data.accounts
+              {sortedAccounts
                 .filter((a) => a.kind === "investment")
                 .map(accountCard)}
             </div>

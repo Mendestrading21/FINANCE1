@@ -3,6 +3,7 @@ import type {
   Balance,
   FinanceData,
   FxRate,
+  Position,
   Recurrence,
   RecurrenceAmount,
   Transaction,
@@ -158,13 +159,45 @@ export function withRecurrenceAmount(
   };
 }
 
+/** Normalizes any cadence to a monthly figure for comparison — e.g. 1200/year and 100/month
+ * both become 100 — rounded half away from zero to the nearest cent, exactly once. Never used
+ * as the real due/settled amount (that stays the actual per-occurrence debit, per
+ * amelioration-v2.md "ne pas... classer un débit annuel réel avec un équivalent mensuel
+ * caché"): only for the "Montant mensuel" sort/display, always labeled as an equivalent. */
+export function monthlyEquivalentMinor(
+  recurrence: Recurrence,
+  at = today(),
+): number {
+  return roundRatio(
+    BigInt(recurrenceAmountAt(recurrence, at)),
+    BigInt(recurrence.intervalMonths),
+  );
+}
+
+/** The date `recurrence`'s occurrence is due in `month`, or null if it has none there
+ * (inactive, before its start, after its end, or `month` isn't a multiple of
+ * `intervalMonths` away from `startDate`). Shared by `transactionsForMonth` (which only
+ * needs the still-unlinked case) and `occurrenceCohort` (which needs every due occurrence
+ * regardless of whether or when it was settled). */
+function occurrenceDueDate(recurrence: Recurrence, month: string): string | null {
+  if (!recurrence.active) return null;
+  const [year, monthNumber] = monthParts(month);
+  const [startYear, startMonth] = monthParts(recurrence.startDate.slice(0, 7));
+  const distance = (year - startYear) * 12 + monthNumber - startMonth;
+  if (distance < 0 || distance % recurrence.intervalMonths !== 0) return null;
+  const date = `${month}-${String(Math.min(recurrence.day, daysInMonth(year, monthNumber))).padStart(2, "0")}`;
+  if (date < recurrence.startDate || (recurrence.endDate && date > recurrence.endDate))
+    return null;
+  return date;
+}
+
 /** Virtual planned occurrences are replaced by an explicit transaction linked to that occurrence,
  * even if its payment date moves to another month. Only actual transaction dates determine cash month. */
 export function transactionsForMonth(
   data: FinanceData,
   month: string,
 ): Transaction[] {
-  const [year, monthNumber] = monthParts(month);
+  monthParts(month); // validates even when nothing below happens to call it
   const result = data.transactions.filter(
     (transaction) =>
       (transaction.date?.slice(0, 7) ?? transaction.budgetMonth) === month,
@@ -175,19 +208,8 @@ export function transactionsForMonth(
       .map((t) => `${t.recurrenceId}:${t.occurrenceDate}`),
   );
   for (const recurrence of data.recurrences) {
-    if (!recurrence.active) continue;
-    const [startYear, startMonth] = monthParts(
-      recurrence.startDate.slice(0, 7),
-    );
-    const distance = (year - startYear) * 12 + monthNumber - startMonth;
-    if (distance < 0 || distance % recurrence.intervalMonths !== 0) continue;
-    const date = `${month}-${String(Math.min(recurrence.day, daysInMonth(year, monthNumber))).padStart(2, "0")}`;
-    if (
-      date < recurrence.startDate ||
-      (recurrence.endDate && date > recurrence.endDate) ||
-      linked.has(`${recurrence.id}:${date}`)
-    )
-      continue;
+    const date = occurrenceDueDate(recurrence, month);
+    if (date === null || linked.has(`${recurrence.id}:${date}`)) continue;
     const id = `${recurrence.id}:${date}`;
     // ID matching is a second guard for older exports that have not persisted the link fields.
     if (data.transactions.some((transaction) => transaction.id === id))
@@ -211,6 +233,229 @@ export function transactionsForMonth(
     (a, b) =>
       (a.date ?? "").localeCompare(b.date ?? "") || a.id.localeCompare(b.id),
   );
+}
+
+export type OccurrenceCohortItem = {
+  recurrenceId: string;
+  occurrenceDate: string;
+  dueAmountMinor: number;
+  currency: string;
+  accountId: string | null;
+  kind: "income" | "expense";
+  recurrenceType: Recurrence["recurrenceType"];
+  label: string;
+  /** The settled transaction linked to this occurrence, whichever month it actually
+   * happened in — null while still due. Only status "settled" closes an occurrence; one
+   * left "planned" or "unknown" is not a règlement. `date` mirrors the transaction's own
+   * (nullable) date: a settlement recorded without a date cannot be dated "payé le …", but
+   * it is still a settlement — see monthSummary's identical treatment of this case.
+   * `currency` is the settled transaction's own currency, not assumed to match the
+   * recurrence's: the editor lets a settlement's currency be corrected before saving. */
+  settled: {
+    transactionId: string;
+    date: string | null;
+    amountMinor: number;
+    currency: string;
+  } | null;
+};
+/** Every occurrence due in `month`, "cohorte d'échéances"-style: unlike `transactionsForMonth`,
+ * always includes an occurrence whose due date falls in `month` even if it was actually
+ * settled in a different month — see amelioration-v2.md/abonnements.md "Calculs": a charge
+ * due 28 February and paid 2 March is 100% due and 100% "réglé" in February's cohort (dated
+ * "payé le 2 mars"), while March's own occurrence remains separate and unrelated. This is the
+ * complement to `transactionsForMonth`/`monthSummary`'s "flux réalisé", which already buckets
+ * settlements by their real date and needs no change for that side. */
+export function occurrenceCohort(
+  data: FinanceData,
+  month: string,
+): OccurrenceCohortItem[] {
+  monthParts(month);
+  const settledByOccurrence = new Map(
+    data.transactions
+      .filter(
+        (t) => t.recurrenceId && t.occurrenceDate && t.status === "settled",
+      )
+      .map((t) => [`${t.recurrenceId}:${t.occurrenceDate}`, t]),
+  );
+  const items: OccurrenceCohortItem[] = [];
+  for (const recurrence of data.recurrences) {
+    const date = occurrenceDueDate(recurrence, month);
+    if (date === null) continue;
+    const settledTransaction = settledByOccurrence.get(`${recurrence.id}:${date}`);
+    items.push({
+      recurrenceId: recurrence.id,
+      occurrenceDate: date,
+      dueAmountMinor: recurrenceAmountAt(recurrence, date),
+      currency: recurrence.currency,
+      accountId: recurrence.accountId,
+      kind: recurrence.kind,
+      recurrenceType: recurrence.recurrenceType,
+      label: recurrence.label,
+      settled: settledTransaction
+        ? {
+            transactionId: settledTransaction.id,
+            date: settledTransaction.date,
+            amountMinor: settledTransaction.amountMinor,
+            currency: settledTransaction.currency,
+          }
+        : null,
+    });
+  }
+  return items.sort(
+    (a, b) =>
+      a.occurrenceDate.localeCompare(b.occurrenceDate) ||
+      a.recurrenceId.localeCompare(b.recurrenceId),
+  );
+}
+
+export type CohortSummary = {
+  dueMinor: number | null;
+  settledMinor: number | null;
+  remainingMinor: number | null;
+  activeCount: number;
+  partial: boolean;
+  excluded: number;
+};
+/** amelioration-v2.md's résumé compact for expense-kind recurring occurrences: "Dû en <mois>",
+ * "Réglé pour <mois>" and "Reste dû", each converted to `currency`. Income recurrences don't
+ * fit "due" framing and are excluded from this aggregate — their own settlement still shows
+ * per-occurrence (`occurrenceCohort`) and in the realized flow (`monthSummary`). A `saving`
+ * recurrence (mise de côté) is excluded too, per abonnements.md "les transferts et mises de
+ * côté ne gonflent pas dépenses et revenus" — it still shows per-occurrence in `occurrenceCohort`
+ * itself. `activeCount` counts every active recurrence regardless of kind or classification. A
+ * month with no due occurrence at all is a confident, computed 0 — that absence is a fact about
+ * the recurrence rules, not a missing observation — but a missing FX rate on any due or settled
+ * amount makes the whole trio null/partial instead of silently treating that one item as zero,
+ * mirroring wealthSummary. */
+export function cohortSummary(
+  data: FinanceData,
+  month: string,
+  currency: string,
+): CohortSummary {
+  const items = occurrenceCohort(data, month).filter(
+    (i) => i.kind === "expense" && i.recurrenceType !== "saving",
+  );
+  const dueParts: number[] = [];
+  const settledParts: number[] = [];
+  let excluded = 0;
+  for (const item of items) {
+    const dueValue = convertMinor(
+      item.dueAmountMinor,
+      item.currency,
+      currency,
+      data.fxRates,
+      item.occurrenceDate,
+    );
+    if (dueValue === null) {
+      excluded++;
+      continue;
+    }
+    dueParts.push(dueValue);
+    if (item.settled) {
+      const settledValue = convertMinor(
+        item.settled.amountMinor,
+        item.settled.currency,
+        currency,
+        data.fxRates,
+        item.settled.date ?? item.occurrenceDate,
+      );
+      if (settledValue === null) {
+        excluded++;
+        continue;
+      }
+      settledParts.push(settledValue);
+    }
+  }
+  const partial = excluded > 0;
+  const dueMinor = partial ? null : sum(dueParts);
+  const settledMinor = partial ? null : sum(settledParts);
+  return {
+    dueMinor,
+    settledMinor,
+    remainingMinor:
+      dueMinor !== null && settledMinor !== null
+        ? sum([dueMinor, -settledMinor])
+        : null,
+    activeCount: data.recurrences.filter((r) => r.active).length,
+    partial,
+    excluded,
+  };
+}
+
+export type RecurringFlowSummary = {
+  paidMinor: number | null;
+  receivedMinor: number | null;
+  partial: boolean;
+  excluded: number;
+};
+/** "Payé en <mois>" / "Reçu en <mois>", scoped to recurrence-linked settlements — the flux
+ * réalisé side of the Abonnements page's résumé, kept separate from `cohortSummary`'s cohort
+ * totals per amelioration-v2.md. Reuses `transactionsForMonth`, which already buckets a
+ * settlement by its real date regardless of which month the occurrence was due in — so a
+ * charge due in February and paid in March counts here in March, matching monthSummary. A
+ * transfer/saving recurrence is excluded from both sides (amelioration-v2.md: "les transferts
+ * et mises de côté ne gonflent pas dépenses et revenus"); a settled-but-undated transaction
+ * makes the total partial rather than being silently skipped or counted as today. */
+export function recurringFlowSummary(
+  data: FinanceData,
+  month: string,
+  currency: string,
+): RecurringFlowSummary {
+  // A recurrence's own `kind` is only ever "income"/"expense" (see Recurrence in types.ts),
+  // never "transfer" — so a `saving` recurrence's linked transactions must be recognized by
+  // this lookup, not by `t.kind`, to actually honor "les mises de côté ne gonflent pas..." above.
+  const recurrenceById = new Map(data.recurrences.map((r) => [r.id, r]));
+  const paidParts: number[] = [];
+  const receivedParts: number[] = [];
+  let excluded = 0;
+  for (const t of transactionsForMonth(data, month)) {
+    if (!t.recurrenceId || t.status !== "settled" || t.kind === "transfer")
+      continue;
+    if (recurrenceById.get(t.recurrenceId)?.recurrenceType === "saving") continue;
+    if (t.date === null) {
+      excluded++;
+      continue;
+    }
+    const value = convertMinor(t.amountMinor, t.currency, currency, data.fxRates, t.date);
+    if (value === null) {
+      excluded++;
+      continue;
+    }
+    (t.kind === "income" ? receivedParts : paidParts).push(value);
+  }
+  const partial = excluded > 0;
+  return {
+    paidMinor: partial ? null : sum(paidParts),
+    receivedMinor: partial ? null : sum(receivedParts),
+    partial,
+    excluded,
+  };
+}
+
+/** The next date `recurrence` is due on or after `from` (inclusive), or null once it has none
+ * left (inactive, or every remaining occurrence is past `endDate`). For a page listing
+ * upcoming subscriptions/charges, not the cohort of a specific already-chosen month. Scans
+ * forward month by month, bounded the same way `availableSummary` bounds its own scan (1200
+ * months / 100 years comfortably covers `intervalMonths`'s 1–120 range). */
+export function nextOccurrenceDate(
+  recurrence: Recurrence,
+  from = today(),
+): string | null {
+  if (!isDate(from)) throw new Error("Date de référence invalide.");
+  if (!recurrence.active) return null;
+  if (recurrence.endDate && from > recurrence.endDate) return null;
+  const [fromYear, fromMonth] = monthParts(
+    (from > recurrence.startDate ? from : recurrence.startDate).slice(0, 7),
+  );
+  for (let offset = 0; offset < 1200; offset++) {
+    const absoluteMonth = fromYear * 12 + fromMonth - 1 + offset;
+    const year = Math.floor(absoluteMonth / 12),
+      monthNumber = (absoluteMonth % 12) + 1;
+    const month = `${String(year).padStart(4, "0")}-${String(monthNumber).padStart(2, "0")}`;
+    const due = occurrenceDueDate(recurrence, month);
+    if (due !== null && due >= from) return due;
+  }
+  return null;
 }
 
 function rateFraction(rate: string): [bigint, bigint] {
@@ -270,6 +515,20 @@ export function monthSummary(
   month: string,
   currency: string,
 ): MonthSummary {
+  // A `saving` recurrence (mise de côté) is out of scope here exactly like a transfer, per
+  // abonnements.md "les transferts et mises de côté ne gonflent pas dépenses et revenus" —
+  // its own `kind` is only ever "income"/"expense" (see Recurrence in types.ts), never
+  // "transfer", so it must be recognized by its linked recurrence's classification, not by
+  // the transaction's own kind. cohortSummary/recurringFlowSummary already honor this; this
+  // mirrors that exclusion for the realized-flow totals Mon mois and Accueil actually show.
+  const savingRecurrenceIds = new Set(
+    data.recurrences
+      .filter((r) => r.recurrenceType === "saving")
+      .map((r) => r.id),
+  );
+  const outOfScope = (t: Transaction) =>
+    t.kind === "transfer" ||
+    (!!t.recurrenceId && savingRecurrenceIds.has(t.recurrenceId));
   const buckets = {
     incomePlanned: [] as number[],
     incomeSettled: [] as number[],
@@ -279,10 +538,10 @@ export function monthSummary(
   // Undated income/expense cannot be assigned to a month: disclose incomplete projection.
   let unknownCount =
     data.transactions.filter(
-      (t) => t.kind !== "transfer" && t.date === null && !t.budgetMonth,
+      (t) => !outOfScope(t) && t.date === null && !t.budgetMonth,
     ).length + data.reviewItems.length;
   for (const transaction of transactionsForMonth(data, month)) {
-    if (transaction.kind === "transfer") continue;
+    if (outOfScope(transaction)) continue;
     // A budget month is not evidence of the month in which money was settled.
     if (
       transaction.status === "unknown" ||
@@ -337,59 +596,80 @@ export function monthSummary(
   };
 }
 
+export type ValueMeasure = {
+  valueMinor: number | null;
+  valuationDate: string | null;
+};
+/** total: balance is the full account value. components: balance is cash, plus positions.
+ * A missing component invalidates that account, rather than pretending it is zero. A debt's
+ * value is always negative regardless of how its sign was entered. `valuationDate` is the
+ * account's own latest balance date; for `components` mode this is the cash leg's date, not a
+ * synthetic date spanning every position — a caller needing a stricter common date across a
+ * components account's positions must still check each position's own `asOf` itself. */
+export function accountValue(
+  account: Account,
+  positions: Position[],
+  currency: string,
+  rates: FxRate[],
+  at = today(),
+): ValueMeasure {
+  const observation = latestBalance(account, at);
+  let valueMinor =
+    observation?.amountMinor == null
+      ? null
+      : convertMinor(
+          observation.amountMinor,
+          account.currency,
+          currency,
+          rates,
+          at,
+        );
+  if (account.valuationMode === "components") {
+    const parts: number[] = valueMinor === null ? [] : [valueMinor];
+    let incomplete = valueMinor === null;
+    for (const position of positions.filter((p) => p.accountId === account.id)) {
+      const value =
+        position.asOf === null ||
+        position.asOf > at ||
+        position.valueMinor === null
+          ? null
+          : convertMinor(
+              position.valueMinor,
+              position.currency,
+              currency,
+              rates,
+              at,
+            );
+      if (value === null) incomplete = true;
+      else parts.push(value);
+    }
+    valueMinor = incomplete ? null : sum(parts);
+  }
+  if (valueMinor !== null && account.kind === "debt")
+    valueMinor = -Math.abs(valueMinor);
+  return {
+    valueMinor,
+    valuationDate: valueMinor === null ? null : (observation?.asOf ?? null),
+  };
+}
+
 export type WealthSummary = {
   totalMinor: number | null;
   partial: boolean;
   excluded: number;
   items: { accountId: string; valueMinor: number | null }[];
 };
-/** total: balance is the full account value. components: balance is cash, plus positions.
- * A missing component invalidates that account, rather than pretending it is zero. */
 export function wealthSummary(
   data: FinanceData,
   currency: string,
   at = today(),
 ): WealthSummary {
   if (!isDate(at)) throw new Error("Date d’évaluation invalide.");
-  const items = data.accounts.map((account) => {
-    const observation = latestBalance(account, at);
-    let valueMinor =
-      observation?.amountMinor == null
-        ? null
-        : convertMinor(
-            observation.amountMinor,
-            account.currency,
-            currency,
-            data.fxRates,
-            at,
-          );
-    if (account.valuationMode === "components") {
-      const parts: number[] = valueMinor === null ? [] : [valueMinor];
-      let incomplete = valueMinor === null;
-      for (const position of data.positions.filter(
-        (p) => p.accountId === account.id,
-      )) {
-        const value =
-          position.asOf === null ||
-          position.asOf > at ||
-          position.valueMinor === null
-            ? null
-            : convertMinor(
-                position.valueMinor,
-                position.currency,
-                currency,
-                data.fxRates,
-                at,
-              );
-        if (value === null) incomplete = true;
-        else parts.push(value);
-      }
-      valueMinor = incomplete ? null : sum(parts);
-    }
-    if (valueMinor !== null && account.kind === "debt")
-      valueMinor = -Math.abs(valueMinor);
-    return { accountId: account.id, valueMinor };
-  });
+  const items = data.accounts.map((account) => ({
+    accountId: account.id,
+    valueMinor: accountValue(account, data.positions, currency, data.fxRates, at)
+      .valueMinor,
+  }));
   const known = items.flatMap((item) =>
     item.valueMinor === null ? [] : [item.valueMinor],
   );
@@ -400,6 +680,54 @@ export function wealthSummary(
     excluded,
     items,
   };
+}
+
+export type Ranked<T> = { item: T; valueMinor: number; valuationDate: string };
+export type RankedList<T> = { ranked: Ranked<T>[]; toValue: T[] };
+/** Descending by value, ties broken by `secondaryKey` (ascending; `Array.prototype.sort` is
+ * itself stable, so this is the only tiebreaker applied — no further invented order). Anything
+ * without both a comparable value and a valuation date goes to `toValue` ("À valoriser")
+ * instead of being placed by a guessed order — see amelioration-v2.md "Listes et ordre".
+ * `measure` decides what "comparable value" means for `T`; this function only ranks and
+ * groups, it never normalizes or converts a value itself (e.g. an annual amount is not
+ * silently turned into a monthly equivalent — the caller's `measure` must already return
+ * values on the same footing before comparing them). */
+export function rankByValue<T>(
+  items: T[],
+  measure: (item: T) => ValueMeasure,
+  secondaryKey: (item: T) => string,
+): RankedList<T> {
+  const ranked: Ranked<T>[] = [];
+  const toValue: T[] = [];
+  for (const item of items) {
+    const { valueMinor, valuationDate } = measure(item);
+    if (valueMinor === null || valuationDate === null) toValue.push(item);
+    else ranked.push({ item, valueMinor, valuationDate });
+  }
+  ranked.sort((a, b) =>
+    a.valueMinor === b.valueMinor
+      ? secondaryKey(a.item).localeCompare(secondaryKey(b.item))
+      : a.valueMinor > b.valueMinor
+        ? -1
+        : 1,
+  );
+  return { ranked, toValue };
+}
+
+/** Accounts ranked from largest to smallest comparable value in `currency`, matching
+ * docs/AUDIT_UI_V2.md's "du plus gros au plus petit" requirement. A debt's negative value
+ * still sorts by that signed value (amelioration-v2.md: "dettes traitées selon la valeur
+ * patrimoniale affichée") — a larger debt ranks lower, it is not moved to `toValue`. */
+export function rankAccounts(
+  data: FinanceData,
+  currency: string,
+  at = today(),
+): RankedList<Account> {
+  return rankByValue(
+    data.accounts,
+    (account) => accountValue(account, data.positions, currency, data.fxRates, at),
+    (account) => account.id,
+  );
 }
 
 export type AvailableSummary = {

@@ -89,6 +89,7 @@ p {
 h1,
 h2,
 h3 {
+  overflow-wrap: anywhere;
   font-family: inherit;
   letter-spacing: -0.035em;
   font-weight: 600;
@@ -381,39 +382,73 @@ img.brand-mark {
   flex-wrap: wrap;
   margin: 0 0 22px;
 }
-.month-picker,
 .currency-picker {
   display: inline-flex;
   align-items: center;
   gap: 11px;
 }
-.month-picker {
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 2px;
-  background: #12141b;
+.month-picker-v2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* Bounds this against .period-bar's own width instead of sizing to its content (all
+   * 12 chips unscrolled): without it, nothing forces .month-row below to shrink, and it
+   * grows the whole page wider than the viewport instead of scrolling internally. */
+  min-width: 0;
+  max-width: 100%;
 }
-.month-picker .icon-button {
-  width: 40px;
-  min-width: 44px;
-  height: 44px;
-  background: transparent;
-  border: 0;
+.year-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
 }
-.month-picker span,
-.month-picker strong {
-  min-width: 104px;
+.year-control strong {
+  min-width: 52px;
   text-align: center;
   font-size: 14px;
   font-weight: 550;
+  font-variant-numeric: tabular-nums;
 }
-.month-picker input {
-  border: 0;
-  background: transparent;
-  padding: 0 5px;
+.year-control .icon-button {
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+}
+.month-picker-v2 > .button {
+  flex-shrink: 0;
+}
+.month-row {
+  display: flex;
+  gap: 4px;
+  background: #11141e;
+  border: 1px solid var(--line);
+  padding: 4px;
+  border-radius: 12px;
+  overflow-x: auto;
+  /* The actual fix: a flex item's automatic min-width is its content size unless this is
+   * also set explicitly — without it, overflow-x:auto alone does not reliably force this
+   * row to respect the space .period-bar has, across nested flex containers. */
+  min-width: 0;
+  flex: 1 1 auto;
+  /* Twelve chips never fit at 390px: scroll, never wrap onto a second line, which
+   * would defeat the point of a compact single-row month picker. */
+  flex-wrap: nowrap;
+}
+.month-chip {
+  flex-shrink: 0;
   min-height: 44px;
-  width: 156px;
-  font-size: 14px;
+  min-width: 44px;
+  padding: 9px 13px;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+}
+.month-chip.active {
+  color: #e5eaff;
+  background: #262d41;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045);
 }
 .currency-picker {
   font-size: 12px;
@@ -695,9 +730,9 @@ img.brand-mark {
 .account-card {
   min-width: 0;
   position: relative;
-  padding: 24px;
+  padding: 18px;
   border: 1px solid #2a2e40;
-  border-radius: 22px;
+  border-radius: 20px;
   background:
     radial-gradient(
       ellipse at 90% 0%,
@@ -726,7 +761,7 @@ img.brand-mark {
   align-items: start;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 31px;
+  margin-bottom: 14px;
 }
 .institution {
   display: flex;
@@ -735,6 +770,7 @@ img.brand-mark {
   min-width: 0;
   font-size: 14px;
   font-weight: 550;
+  overflow-wrap: anywhere;
 }
 .institution-icon {
   width: 42px;
@@ -755,7 +791,7 @@ img.brand-mark {
   font-size: 30px;
   letter-spacing: -0.045em;
   font-weight: 550;
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   overflow-wrap: anywhere;
 }
 .balance small {
@@ -769,6 +805,12 @@ img.brand-mark {
   font-size: 12px;
   color: var(--muted);
   line-height: 1.65;
+}
+.account-card .meta {
+  margin-bottom: 6px;
+}
+.account-card .hero-foot {
+  margin-top: 8px;
 }
 .tag {
   display: inline-flex;
@@ -784,8 +826,8 @@ img.brand-mark {
   line-height: 1.5;
 }
 .account-history {
-  margin-top: 18px;
-  padding-top: 15px;
+  margin-top: 10px;
+  padding-top: 8px;
   border-top: 1px solid var(--line-soft);
 }
 .account-history summary {
@@ -802,6 +844,7 @@ img.brand-mark {
 .row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   padding: 15px 0;
   border-bottom: 1px solid var(--line-soft);
@@ -834,8 +877,12 @@ img.brand-mark {
   color: #d0aec3;
 }
 .row-main {
-  flex: 1;
-  min-width: 0;
+  /* A firm floor, not 0: without it, flex-wrap never has a reason to trigger, and an
+   * action wider than the old icon-only button (see .row > .button below) squeezes this
+   * down to nothing instead — collapsing the label to one character per line via the
+   * overflow-wrap below it needs. Wrapping the action onto its own line reads far better. */
+  flex: 1 1 140px;
+  min-width: 140px;
 }
 .row-title {
   display: block;
@@ -854,6 +901,8 @@ img.brand-mark {
   overflow-wrap: anywhere;
 }
 .row-value {
+  flex-shrink: 0;
+  margin-left: auto;
   text-align: right;
   font-size: 14px;
   font-weight: 550;
@@ -862,6 +911,13 @@ img.brand-mark {
 }
 .row-value .row-detail {
   font-weight: 400;
+}
+/* A text action (e.g. "Marquer payé") is wider than the icon-only actions this was
+ * originally sized for; keep it whole and let it wrap onto its own line rather than
+ * shrink into its own internal line break or squeeze .row-main (see .row-main above). */
+.row > .button {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 .row > .icon-button {
   border-color: transparent;
@@ -1371,6 +1427,7 @@ input::file-selector-button {
 .review-item p {
   margin: 4px 0;
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
 .source-link {
   min-height: 44px;
@@ -1673,15 +1730,12 @@ input::file-selector-button {
     gap: 10px;
     margin-bottom: 17px;
   }
-  .month-picker {
-    gap: 1px;
+  .month-row {
+    padding: 3px;
   }
-  .month-picker span,
-  .month-picker strong {
-    min-width: 96px;
-  }
-  .month-picker input {
-    width: 145px;
+  .month-chip {
+    padding: 8px 11px;
+    font-size: 12px;
   }
   .currency-picker {
     gap: 7px;
@@ -1757,10 +1811,10 @@ input::file-selector-button {
     gap: 15px;
   }
   .account-card {
-    padding: 22px;
+    padding: 16px;
   }
   .account-head {
-    margin-bottom: 25px;
+    margin-bottom: 12px;
   }
   .balance {
     font-size: 30px;

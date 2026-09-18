@@ -1,4 +1,5 @@
 import { isDate } from "./finance";
+import { CURRENT_DATA_VERSION, migrateToCurrentVersion } from "./migration";
 import type {
   Account,
   Balance,
@@ -9,6 +10,7 @@ import type {
   Position,
   Recurrence,
   RecurrenceAmount,
+  RecurrenceType,
   ReviewItem,
   Source,
   Transaction,
@@ -293,11 +295,19 @@ function recurrenceAmount(value: unknown, path: string): RecurrenceAmount {
     effectiveFrom: date(raw.effectiveFrom, `${path}.effectiveFrom`)!,
   };
 }
+const recurrenceTypes: readonly RecurrenceType[] = [
+  "subscription",
+  "bill",
+  "income",
+  "saving",
+  "other",
+];
 function recurrence(value: unknown, path: string): Recurrence {
   const raw = object(value, path, [
     "id",
     "label",
     "kind",
+    "recurrenceType",
     "amountMinor",
     "amountEffectiveFrom",
     "amountHistory",
@@ -321,6 +331,11 @@ function recurrence(value: unknown, path: string): Recurrence {
     id: id(raw.id, `${path}.id`),
     label: text(raw.label, `${path}.label`, 300),
     kind: enumValue(raw.kind, ["income", "expense"], `${path}.kind`),
+    recurrenceType: enumValue(
+      raw.recurrenceType,
+      recurrenceTypes,
+      `${path}.recurrenceType`,
+    ),
     amountMinor: number(raw.amountMinor, `${path}.amountMinor`, false, true)!,
     currency: currency(raw.currency, `${path}.currency`),
     accountId:
@@ -355,6 +370,13 @@ function recurrence(value: unknown, path: string): Recurrence {
   };
   if (result.endDate && result.endDate < result.startDate)
     fail(path, "fin antérieure au début");
+  // recurrenceType "income" is reserved for kind "income": it is what distinguishes a
+  // récurrent revenue from the expense-only subscription/bill/saving classification.
+  if ((result.recurrenceType === "income") !== (result.kind === "income"))
+    fail(
+      path,
+      "la classification « revenu récurrent » doit correspondre à un type revenu",
+    );
   // Amount history stays a strictly ordered chain of superseded amounts, each dated before
   // the current one took effect — the invariant `withRecurrenceAmount` always maintains.
   if (result.amountEffectiveFrom && result.amountEffectiveFrom < result.startDate)
@@ -574,8 +596,10 @@ function unique(
   }
 }
 
-/** Strict version-1 private import boundary. Returns a new validated object; never mutates input.
- * Missing financial observations stay null. A malformed import is rejected atomically. */
+/** Strict private import boundary. Accepts version 1 (migrated in place, see `migration.ts`) or
+ * the current version; always returns the current version. Returns a new validated object;
+ * never mutates input. Missing financial observations stay null. A malformed import, and a
+ * migration failure, are rejected atomically — nothing is written on either. */
 export function validateData(input: unknown): FinanceData {
   let serialized: string | undefined;
   try {
@@ -589,7 +613,7 @@ export function validateData(input: unknown): FinanceData {
     new TextEncoder().encode(serialized).length > MAX_BYTES
   )
     fail("Import", "sauvegarde absente ou trop grande (30 Mo maximum)");
-  const raw = object(input, "Import", [
+  const raw = object(migrateToCurrentVersion(input), "Import", [
     "version",
     "accounts",
     "transactions",
@@ -602,8 +626,11 @@ export function validateData(input: unknown): FinanceData {
     "preferences",
     "importedAt",
   ]);
-  if (raw.version !== 1)
-    fail("version", "seule la version 1 est prise en charge");
+  if (raw.version !== CURRENT_DATA_VERSION)
+    fail(
+      "version",
+      `seule la version ${CURRENT_DATA_VERSION} est prise en charge (ou la version 1, migrée automatiquement)`,
+    );
   const prefs = object(raw.preferences, "preferences", [
     "baseCurrency",
     "locale",
@@ -615,7 +642,7 @@ export function validateData(input: unknown): FinanceData {
     fail("preferences.locale", "locale invalide");
   }
   const data: FinanceData = {
-    version: 1,
+    version: CURRENT_DATA_VERSION,
     accounts: array(raw.accounts, "accounts", account, 1000),
     transactions: array(raw.transactions, "transactions", transaction),
     recurrences: array(raw.recurrences, "recurrences", recurrence, 5000),
@@ -802,7 +829,7 @@ function origin(value: { source: Source }): string | null {
     : null;
 }
 
-/** Idempotent, non-destructive merge of two COMPLETE valid version-1 datasets.
+/** Idempotent, non-destructive merge of two COMPLETE valid current-version datasets.
  * Matching stable ID or source identity: exact values are ignored; any content change is
  * quarantined in reviewItems.raw, preserving existing/manual edits. A human must resolve it.
  * Foreign keys are remapped if an import uses a new local ID for the same source.
