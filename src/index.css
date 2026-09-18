@@ -89,6 +89,7 @@ p {
 h1,
 h2,
 h3 {
+  overflow-wrap: anywhere;
   font-family: inherit;
   letter-spacing: -0.035em;
   font-weight: 600;
@@ -769,6 +770,7 @@ img.brand-mark {
   min-width: 0;
   font-size: 14px;
   font-weight: 550;
+  overflow-wrap: anywhere;
 }
 .institution-icon {
   width: 42px;

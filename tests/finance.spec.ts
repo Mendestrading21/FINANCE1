@@ -802,3 +802,42 @@ test("subscriptions: a status change made on Abonnements updates Mon mois and Ac
 
   expect(errors).toEqual([]);
 });
+
+// Regression: a single very long word (no spaces) in an account or institution name overflowed
+// the page horizontally once the grid's last column had no blank cells left to absorb it —
+// .institution and the account-head <h3> had no overflow-wrap, unlike .balance. Six accounts
+// fill all three .account-grid columns at desktop width, which is what actually triggers it;
+// a lone account does not (the overflow bleeds into empty grid cells instead of the viewport).
+test("accounts: an unbroken long institution name wraps instead of overflowing the page", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/");
+  await page.getByLabel("Phrase secrète", { exact: true }).fill("Exemple-test-Finance-debordement-2026");
+  await page
+    .getByLabel("Confirmer la phrase secrète")
+    .fill("Exemple-test-Finance-debordement-2026");
+  await page.getByRole("button", { name: "Créer mon coffre" }).click();
+  await page
+    .getByRole("navigation", { name: "Navigation principale", exact: true })
+    .getByRole("button", { name: "Mes comptes", exact: true })
+    .click();
+  const longWord = "Établissementfinancierfictifinternationalsansespaceaucun";
+  for (const label of ["A", "B", "C", "D", "E", "F"]) {
+    await page.getByRole("button", { name: "Ajouter", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("Nom du compte").fill(`Compte ${label}`);
+    await dialog.getByLabel("Établissement").fill(longWord);
+    await dialog
+      .getByRole("button", { name: "Enregistrer", exact: true })
+      .click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+  }
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  expect(errors).toEqual([]);
+});
