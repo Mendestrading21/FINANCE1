@@ -11,6 +11,7 @@ const recurrence = (extra: Partial<Recurrence> = {}): Recurrence => ({
   id: "rent",
   label: "Loyer",
   kind: "expense",
+  recurrenceType: "bill",
   amountMinor: 200000,
   currency: "CHF",
   accountId: "bank",
@@ -79,9 +80,18 @@ describe("frontière de validation des données privées", () => {
       null,
       {},
       [],
-      { ...emptyData(), version: 2 },
+      { ...emptyData(), version: 3 },
       { ...emptyData(), surprising: true },
       { ...emptyData(), transactions: {} },
+      // A version-1 import with a corrupted `recurrences` field must still be rejected after
+      // migration, not silently accepted with its recurrences dropped (see migration.test.ts).
+      { ...emptyData(), version: 1, recurrences: { hack: true } },
+      { ...emptyData(), version: 1, recurrences: "oops" },
+      (() => {
+        const d: Record<string, unknown> = { ...emptyData(), version: 1 };
+        delete d.recurrences;
+        return d;
+      })(),
     ])
       expect(() => validateData(malformed)).toThrow();
   });

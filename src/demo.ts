@@ -127,6 +127,7 @@ export function demoData(): FinanceData {
       id: "demo-stream",
       label: "Abonnement musique",
       kind: "expense",
+      recurrenceType: "subscription",
       amountMinor: 1590,
       currency: "CHF",
       accountId: "demo-bank",

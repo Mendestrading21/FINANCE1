@@ -55,6 +55,7 @@ const recurrence = (extra: Partial<Recurrence> = {}): Recurrence => ({
   id: "rent",
   label: "Loyer",
   kind: "expense",
+  recurrenceType: "bill",
   amountMinor: 200000,
   currency: "CHF",
   accountId: "bank",

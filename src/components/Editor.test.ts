@@ -15,6 +15,7 @@ const recurrence = (extra: Partial<Recurrence> = {}): Recurrence => ({
   id: "sub",
   label: "Abonnement",
   kind: "expense",
+  recurrenceType: "subscription",
   amountMinor: 2000,
   currency: "CHF",
   accountId: "bank",

@@ -65,6 +65,49 @@ function toB64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+/** Builds a version-1 business-data envelope, sealed with an already-derived vault `key`
+ * (reusing its exact kdf salt/iterations, as a real legacy file would carry). Lets tests
+ * exercise `migrateToCurrentVersion` exactly as `open()` runs it, without a public API that
+ * could ever write a pre-migration shape (`seal()` always validates/migrates first). */
+async function encryptLegacyEnvelope(
+  key: CryptoKey,
+  kdf: { salt: string; iterations: number },
+  businessData: unknown,
+  savedAt: string,
+): Promise<string> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const metadata = {
+    format: "Finance",
+    version: 1,
+    kdf: { name: "PBKDF2", hash: "SHA-256", iterations: kdf.iterations, salt: kdf.salt },
+    cipher: { name: "AES-GCM", iv: toB64(iv), tagLength: 128 },
+    savedAt,
+  };
+  const additionalData = new TextEncoder().encode(
+    JSON.stringify([
+      metadata.format,
+      metadata.version,
+      metadata.kdf.name,
+      metadata.kdf.hash,
+      metadata.kdf.iterations,
+      metadata.kdf.salt,
+      metadata.cipher.name,
+      metadata.cipher.iv,
+      metadata.cipher.tagLength,
+      metadata.savedAt,
+    ]),
+  );
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv, tagLength: 128, additionalData },
+    key,
+    new TextEncoder().encode(JSON.stringify(businessData)),
+  );
+  return JSON.stringify({
+    ...metadata,
+    ciphertext: toB64(new Uint8Array(ciphertext)),
+  });
+}
+
 beforeEach(() => {
   local = new MemoryStorage();
   vi.stubGlobal("localStorage", local);
@@ -433,5 +476,83 @@ describe("coffre privé avec le vrai Web Crypto", () => {
     vi.useRealTimers();
     const restored = await importVault(legacyBackup, PASSPHRASE);
     expect(restored.data).toEqual(legacyData);
+  });
+
+  it("migre un coffre version 1 (sans classification de récurrence) à l’ouverture", async () => {
+    const key = await createVault(PASSPHRASE, sample());
+    const current = JSON.parse(exportVault()) as {
+      kdf: { salt: string; iterations: number };
+    };
+    local.clear();
+    const legacyRecurrence = {
+      id: "old-sub",
+      label: "Streaming",
+      kind: "expense",
+      amountMinor: 1500,
+      currency: "CHF",
+      accountId: null,
+      category: "Abonnements",
+      day: 5,
+      intervalMonths: 1,
+      startDate: "2020-01-05",
+      active: true,
+      source: { system: "manual" },
+    };
+    const legacyData = {
+      ...emptyData(),
+      version: 1,
+      recurrences: [legacyRecurrence],
+    };
+    const legacyBackup = await encryptLegacyEnvelope(
+      key,
+      current.kdf,
+      legacyData,
+      new Date().toISOString(),
+    );
+    local.setItem("finance.vault.v1", legacyBackup);
+    const opened = await unlockVault(PASSPHRASE);
+    expect(opened.data.version).toBe(2);
+    expect(opened.data.recurrences).toEqual([
+      { ...legacyRecurrence, recurrenceType: "subscription" },
+    ]);
+  });
+
+  it("rejette un import version 1 dont la classification déjà présente contredit le type, sans remplacer le coffre existant", async () => {
+    // A recurrence that already carries an (inconsistent) recurrenceType is never silently
+    // reclassified by migration — it reaches validation as-is, which must reject it, exactly
+    // like any other invalid import: nothing is written.
+    const key = await createVault(PASSPHRASE, sample());
+    const before = exportVault();
+    const current = JSON.parse(before) as {
+      kdf: { salt: string; iterations: number };
+    };
+    const inconsistentRecurrence = {
+      id: "bad",
+      label: "Salaire",
+      kind: "income",
+      recurrenceType: "subscription",
+      amountMinor: 500000,
+      currency: "CHF",
+      accountId: null,
+      category: "Revenus",
+      day: 1,
+      intervalMonths: 1,
+      startDate: "2020-01-01",
+      active: true,
+      source: { system: "manual" },
+    };
+    const legacyData = {
+      ...emptyData(),
+      version: 1,
+      recurrences: [inconsistentRecurrence],
+    };
+    const badBackup = await encryptLegacyEnvelope(
+      key,
+      current.kdf,
+      legacyData,
+      new Date().toISOString(),
+    );
+    await expect(importVault(badBackup, PASSPHRASE)).rejects.toThrow();
+    expect(exportVault()).toBe(before);
   });
 });

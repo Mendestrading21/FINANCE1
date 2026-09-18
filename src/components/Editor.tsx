@@ -65,6 +65,11 @@ export default function Editor({
       data.transactions.find((t) => t.id === spec.id)?.kind ||
       "expense",
   );
+  // recurrenceType "income" only applies to kind "income" (validation.ts enforces it); this
+  // tracks the recurrence form's own kind select so the Nature options stay coherent with it.
+  const [recurrenceKind, setRecurrenceKind] = useState<"income" | "expense">(
+    data.recurrences.find((r) => r.id === spec.id)?.kind ?? "expense",
+  );
   const item =
     spec.type === "transaction"
       ? data.transactions.find((i) => i.id === spec.id)
@@ -316,6 +321,7 @@ export default function Editor({
           id,
           label: get("label"),
           kind: get("kind") as "income" | "expense",
+          recurrenceType: get("recurrenceType") as Recurrence["recurrenceType"],
           amountMinor: amounts.amountMinor,
           amountEffectiveFrom: amounts.amountEffectiveFrom,
           amountHistory: amounts.amountHistory,
@@ -568,12 +574,33 @@ export default function Editor({
               {field("Libellé", "label", { required: true })}
               {field("Type", "kind", {
                 defaultValue: val("kind", "expense"),
+                onChange: (e) =>
+                  setRecurrenceKind(e.target.value as "income" | "expense"),
                 children: (
                   <>
                     <option value="expense">Dépense</option>
                     <option value="income">Revenu</option>
                   </>
                 ),
+              })}
+              {field("Nature", "recurrenceType", {
+                defaultValue: val(
+                  "recurrenceType",
+                  recurrenceKind === "income" ? "income" : "subscription",
+                ),
+                children:
+                  recurrenceKind === "income" ? (
+                    <option value="income">Revenu récurrent</option>
+                  ) : (
+                    <>
+                      <option value="subscription">Abonnement</option>
+                      <option value="bill">
+                        Charge (loyer, assurance…)
+                      </option>
+                      <option value="saving">Épargne / mise de côté</option>
+                      <option value="other">Autre à vérifier</option>
+                    </>
+                  ),
               })}
               {field("Montant", "amountMinor", {
                 defaultValue: amount("amountMinor"),
