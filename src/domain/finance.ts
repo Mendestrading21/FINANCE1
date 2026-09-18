@@ -3,6 +3,7 @@ import type {
   Balance,
   FinanceData,
   FxRate,
+  Position,
   Recurrence,
   RecurrenceAmount,
   Transaction,
@@ -337,59 +338,80 @@ export function monthSummary(
   };
 }
 
+export type ValueMeasure = {
+  valueMinor: number | null;
+  valuationDate: string | null;
+};
+/** total: balance is the full account value. components: balance is cash, plus positions.
+ * A missing component invalidates that account, rather than pretending it is zero. A debt's
+ * value is always negative regardless of how its sign was entered. `valuationDate` is the
+ * account's own latest balance date; for `components` mode this is the cash leg's date, not a
+ * synthetic date spanning every position — a caller needing a stricter common date across a
+ * components account's positions must still check each position's own `asOf` itself. */
+export function accountValue(
+  account: Account,
+  positions: Position[],
+  currency: string,
+  rates: FxRate[],
+  at = today(),
+): ValueMeasure {
+  const observation = latestBalance(account, at);
+  let valueMinor =
+    observation?.amountMinor == null
+      ? null
+      : convertMinor(
+          observation.amountMinor,
+          account.currency,
+          currency,
+          rates,
+          at,
+        );
+  if (account.valuationMode === "components") {
+    const parts: number[] = valueMinor === null ? [] : [valueMinor];
+    let incomplete = valueMinor === null;
+    for (const position of positions.filter((p) => p.accountId === account.id)) {
+      const value =
+        position.asOf === null ||
+        position.asOf > at ||
+        position.valueMinor === null
+          ? null
+          : convertMinor(
+              position.valueMinor,
+              position.currency,
+              currency,
+              rates,
+              at,
+            );
+      if (value === null) incomplete = true;
+      else parts.push(value);
+    }
+    valueMinor = incomplete ? null : sum(parts);
+  }
+  if (valueMinor !== null && account.kind === "debt")
+    valueMinor = -Math.abs(valueMinor);
+  return {
+    valueMinor,
+    valuationDate: valueMinor === null ? null : (observation?.asOf ?? null),
+  };
+}
+
 export type WealthSummary = {
   totalMinor: number | null;
   partial: boolean;
   excluded: number;
   items: { accountId: string; valueMinor: number | null }[];
 };
-/** total: balance is the full account value. components: balance is cash, plus positions.
- * A missing component invalidates that account, rather than pretending it is zero. */
 export function wealthSummary(
   data: FinanceData,
   currency: string,
   at = today(),
 ): WealthSummary {
   if (!isDate(at)) throw new Error("Date d’évaluation invalide.");
-  const items = data.accounts.map((account) => {
-    const observation = latestBalance(account, at);
-    let valueMinor =
-      observation?.amountMinor == null
-        ? null
-        : convertMinor(
-            observation.amountMinor,
-            account.currency,
-            currency,
-            data.fxRates,
-            at,
-          );
-    if (account.valuationMode === "components") {
-      const parts: number[] = valueMinor === null ? [] : [valueMinor];
-      let incomplete = valueMinor === null;
-      for (const position of data.positions.filter(
-        (p) => p.accountId === account.id,
-      )) {
-        const value =
-          position.asOf === null ||
-          position.asOf > at ||
-          position.valueMinor === null
-            ? null
-            : convertMinor(
-                position.valueMinor,
-                position.currency,
-                currency,
-                data.fxRates,
-                at,
-              );
-        if (value === null) incomplete = true;
-        else parts.push(value);
-      }
-      valueMinor = incomplete ? null : sum(parts);
-    }
-    if (valueMinor !== null && account.kind === "debt")
-      valueMinor = -Math.abs(valueMinor);
-    return { accountId: account.id, valueMinor };
-  });
+  const items = data.accounts.map((account) => ({
+    accountId: account.id,
+    valueMinor: accountValue(account, data.positions, currency, data.fxRates, at)
+      .valueMinor,
+  }));
   const known = items.flatMap((item) =>
     item.valueMinor === null ? [] : [item.valueMinor],
   );
@@ -400,6 +422,54 @@ export function wealthSummary(
     excluded,
     items,
   };
+}
+
+export type Ranked<T> = { item: T; valueMinor: number; valuationDate: string };
+export type RankedList<T> = { ranked: Ranked<T>[]; toValue: T[] };
+/** Descending by value, ties broken by `secondaryKey` (ascending; `Array.prototype.sort` is
+ * itself stable, so this is the only tiebreaker applied — no further invented order). Anything
+ * without both a comparable value and a valuation date goes to `toValue` ("À valoriser")
+ * instead of being placed by a guessed order — see amelioration-v2.md "Listes et ordre".
+ * `measure` decides what "comparable value" means for `T`; this function only ranks and
+ * groups, it never normalizes or converts a value itself (e.g. an annual amount is not
+ * silently turned into a monthly equivalent — the caller's `measure` must already return
+ * values on the same footing before comparing them). */
+export function rankByValue<T>(
+  items: T[],
+  measure: (item: T) => ValueMeasure,
+  secondaryKey: (item: T) => string,
+): RankedList<T> {
+  const ranked: Ranked<T>[] = [];
+  const toValue: T[] = [];
+  for (const item of items) {
+    const { valueMinor, valuationDate } = measure(item);
+    if (valueMinor === null || valuationDate === null) toValue.push(item);
+    else ranked.push({ item, valueMinor, valuationDate });
+  }
+  ranked.sort((a, b) =>
+    a.valueMinor === b.valueMinor
+      ? secondaryKey(a.item).localeCompare(secondaryKey(b.item))
+      : a.valueMinor > b.valueMinor
+        ? -1
+        : 1,
+  );
+  return { ranked, toValue };
+}
+
+/** Accounts ranked from largest to smallest comparable value in `currency`, matching
+ * docs/AUDIT_UI_V2.md's "du plus gros au plus petit" requirement. A debt's negative value
+ * still sorts by that signed value (amelioration-v2.md: "dettes traitées selon la valeur
+ * patrimoniale affichée") — a larger debt ranks lower, it is not moved to `toValue`. */
+export function rankAccounts(
+  data: FinanceData,
+  currency: string,
+  at = today(),
+): RankedList<Account> {
+  return rankByValue(
+    data.accounts,
+    (account) => accountValue(account, data.positions, currency, data.fxRates, at),
+    (account) => account.id,
+  );
 }
 
 export type AvailableSummary = {

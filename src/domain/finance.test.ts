@@ -7,6 +7,8 @@ import {
   monthLabel,
   monthSummary,
   parseMoney,
+  rankAccounts,
+  rankByValue,
   recurrenceAmountAt,
   today,
   transactionsForMonth,
@@ -243,6 +245,114 @@ describe("observations et patrimoine", () => {
         "2026-09-17",
       ),
     ).toThrow();
+  });
+});
+
+describe("tri par valeur comparable", () => {
+  it("classe du plus gros au plus petit", () => {
+    const d = data({
+      accounts: [
+        account("small", 12845_00),
+        account("big", 48150_00),
+        account("mid", 36500_00),
+      ],
+    });
+    const { ranked, toValue } = rankAccounts(d, "CHF", "2026-09-17");
+    expect(ranked.map((r) => r.item.id)).toEqual(["big", "mid", "small"]);
+    expect(toValue).toEqual([]);
+  });
+  it("classe une dette selon sa valeur patrimoniale signée, sans l'écarter en À valoriser", () => {
+    const d = data({
+      accounts: [
+        account("bank", 50000, "2026-09-17"),
+        account("debt", 20000, "2026-09-17", { kind: "debt" }),
+      ],
+    });
+    const { ranked, toValue } = rankAccounts(d, "CHF", "2026-09-17");
+    expect(ranked.map((r) => r.item.id)).toEqual(["bank", "debt"]);
+    expect(ranked[1].valueMinor).toBe(-20000);
+    expect(toValue).toEqual([]);
+  });
+  it("place les comptes sans taux commun dans À valoriser plutôt que de leur inventer un rang", () => {
+    const d = data({
+      accounts: [
+        account("bank", 100000, "2026-09-17"),
+        account("foreign", 50000, "2026-09-17", { currency: "EUR" }),
+      ],
+    });
+    const { ranked, toValue } = rankAccounts(d, "CHF", "2026-09-17");
+    expect(ranked.map((r) => r.item.id)).toEqual(["bank"]);
+    expect(toValue.map((a) => a.id)).toEqual(["foreign"]);
+  });
+  it("place un compte à zéro dans le classement, pas dans À valoriser", () => {
+    const d = data({ accounts: [account("zero", 0, "2026-09-17")] });
+    const { ranked, toValue } = rankAccounts(d, "CHF", "2026-09-17");
+    expect(ranked).toHaveLength(1);
+    expect(ranked[0].valueMinor).toBe(0);
+    expect(toValue).toEqual([]);
+  });
+  it("place un compte en composantes incomplètes dans À valoriser", () => {
+    const d = data({
+      accounts: [
+        account("broker", 10000, "2026-09-17", {
+          kind: "investment",
+          valuationMode: "components",
+        }),
+      ],
+      positions: [
+        {
+          id: "pos",
+          accountId: "broker",
+          name: "Action",
+          symbol: "T",
+          assetType: "stock",
+          quantity: "1",
+          valueMinor: null,
+          currency: "CHF",
+          asOf: "2026-09-17",
+          source,
+        },
+      ],
+    });
+    const { ranked, toValue } = rankAccounts(d, "CHF", "2026-09-17");
+    expect(ranked).toEqual([]);
+    expect(toValue.map((a) => a.id)).toEqual(["broker"]);
+  });
+  it("départage des égalités par la clé secondaire, de façon stable et déterministe", () => {
+    const d = data({
+      accounts: [
+        account("zeta", 10000, "2026-09-17"),
+        account("alpha", 10000, "2026-09-17"),
+      ],
+    });
+    const { ranked } = rankAccounts(d, "CHF", "2026-09-17");
+    expect(ranked.map((r) => r.item.id)).toEqual(["alpha", "zeta"]);
+  });
+  it("ne normalise jamais une mesure elle-même : un rang brut annuel face à un mensuel doit être fourni déjà comparable par l'appelant", () => {
+    // rankByValue only ranks and groups what `measure` gives it; it must never guess that
+    // 120 (a yearly figure) and 11 (a monthly one) are on the same footing.
+    const items = [
+      { id: "yearly", amountMinor: 12000, valuationDate: "2026-09-01" },
+      { id: "monthly", amountMinor: 1100, valuationDate: "2026-09-01" },
+    ];
+    const { ranked } = rankByValue(
+      items,
+      (i) => ({ valueMinor: i.amountMinor, valuationDate: i.valuationDate }),
+      (i) => i.id,
+    );
+    // Ranked exactly by the raw values handed to it — 12000 > 1100 — proving no hidden
+    // per-month/per-year normalization happens inside rankByValue itself.
+    expect(ranked.map((r) => r.item.id)).toEqual(["yearly", "monthly"]);
+  });
+  it("groupe en À valoriser un élément sans date de valorisation même si sa valeur est connue", () => {
+    const items = [{ id: "undated", valueMinor: 500 }];
+    const { ranked, toValue } = rankByValue(
+      items,
+      (i) => ({ valueMinor: i.valueMinor, valuationDate: null }),
+      (i) => i.id,
+    );
+    expect(ranked).toEqual([]);
+    expect(toValue).toEqual(items);
   });
 });
 
