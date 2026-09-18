@@ -6,6 +6,7 @@ import {
   money,
   monthLabel,
   monthSummary,
+  occurrenceCohort,
   parseMoney,
   rankAccounts,
   rankByValue,
@@ -559,6 +560,136 @@ describe("mois et récurrences", () => {
       ],
     });
     expect(monthSummary(d, "2026-09", "CHF").remaining).toBeNull();
+  });
+});
+
+describe("cohorte d'échéances (occurrenceCohort)", () => {
+  // The mandatory example from abonnements.md "Calculs": a 100 CHF charge due 28 February,
+  // paid 2 March. February's cohort must show it 100% due, 100% "réglé" (dated 2 March);
+  // February's flux (transactionsForMonth) must show 0 for it; March's flux must show 100;
+  // March's own occurrence must remain separate and unrelated.
+  const lateRecurrence = recurrence({
+    id: "rent",
+    label: "Loyer",
+    amountMinor: 10000,
+    day: 28,
+    intervalMonths: 1,
+    startDate: "2026-01-28",
+  });
+  const settledInMarch = transaction({
+    id: "rent:2026-02-28",
+    label: "Loyer",
+    amountMinor: 10000,
+    status: "settled",
+    date: "2026-03-02",
+    recurrenceId: "rent",
+    occurrenceDate: "2026-02-28",
+  });
+  it("reste dû à zéro et date le règlement même réglé un autre mois", () => {
+    const d = data({
+      recurrences: [lateRecurrence],
+      transactions: [settledInMarch],
+    });
+    const february = occurrenceCohort(d, "2026-02");
+    expect(february).toEqual([
+      {
+        recurrenceId: "rent",
+        occurrenceDate: "2026-02-28",
+        dueAmountMinor: 10000,
+        currency: "CHF",
+        accountId: "bank",
+        kind: "expense",
+        label: "Loyer",
+        settled: {
+          transactionId: "rent:2026-02-28",
+          date: "2026-03-02",
+          amountMinor: 10000,
+        },
+      },
+    ]);
+  });
+  it("l'échéance propre au mois du règlement reste distincte, non réglée", () => {
+    const d = data({
+      recurrences: [lateRecurrence],
+      transactions: [settledInMarch],
+    });
+    const march = occurrenceCohort(d, "2026-03");
+    expect(march).toEqual([
+      expect.objectContaining({ occurrenceDate: "2026-03-28", settled: null }),
+    ]);
+  });
+  it("le flux réalisé de février est nul, celui de mars inclut le règlement tardif", () => {
+    const d = data({
+      recurrences: [lateRecurrence],
+      transactions: [settledInMarch],
+    });
+    expect(
+      transactionsForMonth(d, "2026-02").some((t) => t.recurrenceId === "rent"),
+    ).toBe(false);
+    const marchFlow = transactionsForMonth(d, "2026-03").find(
+      (t) => t.id === "rent:2026-02-28",
+    );
+    expect(marchFlow).toMatchObject({ status: "settled", date: "2026-03-02" });
+  });
+  it("une occurrence encore due n'a pas de règlement", () => {
+    const d = data({ recurrences: [lateRecurrence] });
+    expect(occurrenceCohort(d, "2026-02")).toEqual([
+      expect.objectContaining({ occurrenceDate: "2026-02-28", settled: null }),
+    ]);
+  });
+  it("un lien vers une transaction encore planifiée ou à vérifier ne règle pas l'occurrence", () => {
+    const d = data({
+      recurrences: [lateRecurrence],
+      transactions: [
+        transaction({
+          id: "rent:2026-02-28",
+          status: "planned",
+          date: "2026-02-28",
+          recurrenceId: "rent",
+          occurrenceDate: "2026-02-28",
+        }),
+      ],
+    });
+    expect(occurrenceCohort(d, "2026-02")).toEqual([
+      expect.objectContaining({ settled: null }),
+    ]);
+  });
+  it("une récurrence inactive ne crée plus de nouvelles occurrences, sans effacer son historique", () => {
+    const d = data({
+      recurrences: [{ ...lateRecurrence, active: false }],
+      transactions: [settledInMarch],
+    });
+    expect(occurrenceCohort(d, "2026-04")).toEqual([]);
+    // Its already-settled occurrence still exists as a real transaction, unaffected.
+    expect(
+      d.transactions.find((t) => t.id === "rent:2026-02-28")?.status,
+    ).toBe("settled");
+  });
+  it("garde un montant nul quand le règlement lui-même n'a pas de date", () => {
+    const d = data({
+      recurrences: [lateRecurrence],
+      transactions: [
+        transaction({
+          id: "rent:2026-02-28",
+          amountMinor: 10000,
+          status: "settled",
+          date: null,
+          recurrenceId: "rent",
+          occurrenceDate: "2026-02-28",
+        }),
+      ],
+    });
+    expect(occurrenceCohort(d, "2026-02")).toEqual([
+      expect.objectContaining({
+        settled: { transactionId: "rent:2026-02-28", date: null, amountMinor: 10000 },
+      }),
+    ]);
+  });
+  it("un changement de montant futur n'altère pas les occurrences des mois antérieurs", () => {
+    const raised = withRecurrenceAmount(lateRecurrence, 12000, "2026-03-01");
+    const d = data({ recurrences: [raised] });
+    expect(occurrenceCohort(d, "2026-02")[0].dueAmountMinor).toBe(10000);
+    expect(occurrenceCohort(d, "2026-03")[0].dueAmountMinor).toBe(12000);
   });
 });
 

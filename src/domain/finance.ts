@@ -159,13 +159,30 @@ export function withRecurrenceAmount(
   };
 }
 
+/** The date `recurrence`'s occurrence is due in `month`, or null if it has none there
+ * (inactive, before its start, after its end, or `month` isn't a multiple of
+ * `intervalMonths` away from `startDate`). Shared by `transactionsForMonth` (which only
+ * needs the still-unlinked case) and `occurrenceCohort` (which needs every due occurrence
+ * regardless of whether or when it was settled). */
+function occurrenceDueDate(recurrence: Recurrence, month: string): string | null {
+  if (!recurrence.active) return null;
+  const [year, monthNumber] = monthParts(month);
+  const [startYear, startMonth] = monthParts(recurrence.startDate.slice(0, 7));
+  const distance = (year - startYear) * 12 + monthNumber - startMonth;
+  if (distance < 0 || distance % recurrence.intervalMonths !== 0) return null;
+  const date = `${month}-${String(Math.min(recurrence.day, daysInMonth(year, monthNumber))).padStart(2, "0")}`;
+  if (date < recurrence.startDate || (recurrence.endDate && date > recurrence.endDate))
+    return null;
+  return date;
+}
+
 /** Virtual planned occurrences are replaced by an explicit transaction linked to that occurrence,
  * even if its payment date moves to another month. Only actual transaction dates determine cash month. */
 export function transactionsForMonth(
   data: FinanceData,
   month: string,
 ): Transaction[] {
-  const [year, monthNumber] = monthParts(month);
+  monthParts(month); // validates even when nothing below happens to call it
   const result = data.transactions.filter(
     (transaction) =>
       (transaction.date?.slice(0, 7) ?? transaction.budgetMonth) === month,
@@ -176,19 +193,8 @@ export function transactionsForMonth(
       .map((t) => `${t.recurrenceId}:${t.occurrenceDate}`),
   );
   for (const recurrence of data.recurrences) {
-    if (!recurrence.active) continue;
-    const [startYear, startMonth] = monthParts(
-      recurrence.startDate.slice(0, 7),
-    );
-    const distance = (year - startYear) * 12 + monthNumber - startMonth;
-    if (distance < 0 || distance % recurrence.intervalMonths !== 0) continue;
-    const date = `${month}-${String(Math.min(recurrence.day, daysInMonth(year, monthNumber))).padStart(2, "0")}`;
-    if (
-      date < recurrence.startDate ||
-      (recurrence.endDate && date > recurrence.endDate) ||
-      linked.has(`${recurrence.id}:${date}`)
-    )
-      continue;
+    const date = occurrenceDueDate(recurrence, month);
+    if (date === null || linked.has(`${recurrence.id}:${date}`)) continue;
     const id = `${recurrence.id}:${date}`;
     // ID matching is a second guard for older exports that have not persisted the link fields.
     if (data.transactions.some((transaction) => transaction.id === id))
@@ -211,6 +217,69 @@ export function transactionsForMonth(
   return result.sort(
     (a, b) =>
       (a.date ?? "").localeCompare(b.date ?? "") || a.id.localeCompare(b.id),
+  );
+}
+
+export type OccurrenceCohortItem = {
+  recurrenceId: string;
+  occurrenceDate: string;
+  dueAmountMinor: number;
+  currency: string;
+  accountId: string | null;
+  kind: "income" | "expense";
+  label: string;
+  /** The settled transaction linked to this occurrence, whichever month it actually
+   * happened in — null while still due. Only status "settled" closes an occurrence; one
+   * left "planned" or "unknown" is not a règlement. `date` mirrors the transaction's own
+   * (nullable) date: a settlement recorded without a date cannot be dated "payé le …", but
+   * it is still a settlement — see monthSummary's identical treatment of this case. */
+  settled: { transactionId: string; date: string | null; amountMinor: number } | null;
+};
+/** Every occurrence due in `month`, "cohorte d'échéances"-style: unlike `transactionsForMonth`,
+ * always includes an occurrence whose due date falls in `month` even if it was actually
+ * settled in a different month — see amelioration-v2.md/abonnements.md "Calculs": a charge
+ * due 28 February and paid 2 March is 100% due and 100% "réglé" in February's cohort (dated
+ * "payé le 2 mars"), while March's own occurrence remains separate and unrelated. This is the
+ * complement to `transactionsForMonth`/`monthSummary`'s "flux réalisé", which already buckets
+ * settlements by their real date and needs no change for that side. */
+export function occurrenceCohort(
+  data: FinanceData,
+  month: string,
+): OccurrenceCohortItem[] {
+  monthParts(month);
+  const settledByOccurrence = new Map(
+    data.transactions
+      .filter(
+        (t) => t.recurrenceId && t.occurrenceDate && t.status === "settled",
+      )
+      .map((t) => [`${t.recurrenceId}:${t.occurrenceDate}`, t]),
+  );
+  const items: OccurrenceCohortItem[] = [];
+  for (const recurrence of data.recurrences) {
+    const date = occurrenceDueDate(recurrence, month);
+    if (date === null) continue;
+    const settledTransaction = settledByOccurrence.get(`${recurrence.id}:${date}`);
+    items.push({
+      recurrenceId: recurrence.id,
+      occurrenceDate: date,
+      dueAmountMinor: recurrenceAmountAt(recurrence, date),
+      currency: recurrence.currency,
+      accountId: recurrence.accountId,
+      kind: recurrence.kind,
+      label: recurrence.label,
+      settled: settledTransaction
+        ? {
+            transactionId: settledTransaction.id,
+            date: settledTransaction.date,
+            amountMinor: settledTransaction.amountMinor,
+          }
+        : null,
+    });
+  }
+  return items.sort(
+    (a, b) =>
+      a.occurrenceDate.localeCompare(b.occurrenceDate) ||
+      a.recurrenceId.localeCompare(b.recurrenceId),
   );
 }
 
