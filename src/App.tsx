@@ -49,6 +49,7 @@ import { Icon, type IconName } from "./components/Icon";
 import { Allocation, FlowChart, WealthChart } from "./components/Charts";
 import Editor, { type EditorSpec } from "./components/Editor";
 import { MonthPicker } from "./components/MonthPicker";
+import { UPDATE_READY_EVENT } from "./swUpdateEvent";
 const pages = [
   { id: "overview", name: "Vue d’ensemble", short: "Accueil", icon: "home" },
   { id: "month", name: "Mon mois", short: "Mon mois", icon: "calendar" },
@@ -445,6 +446,7 @@ export default function App() {
     [editor, setEditor] = useState<EditorSpec | null>(null),
     [message, setMessage] = useState(""),
     [error, setError] = useState(""),
+    [updateReady, setUpdateReady] = useState(false),
     [filter, setFilter] = useState("all"),
     [subsStatus, setSubsStatus] = useState<"all" | "due" | "settled">("all"),
     [subsSort, setSubsSort] = useState<"amount" | "next">("amount"),
@@ -500,6 +502,11 @@ export default function App() {
       return () => clearTimeout(timer);
     }
   }, [message]);
+  useEffect(() => {
+    const onUpdateReady = () => setUpdateReady(true);
+    window.addEventListener(UPDATE_READY_EVENT, onUpdateReady);
+    return () => window.removeEventListener(UPDATE_READY_EVENT, onUpdateReady);
+  }, []);
   useEffect(() => {
     if (preview) previewDialog.current?.showModal();
     return () => {
@@ -1276,6 +1283,17 @@ export default function App() {
         {message && (
           <div className="notice toast" role="status">
             {message}
+          </div>
+        )}
+        {updateReady && (
+          <div className="notice" role="status">
+            Une nouvelle version de Finance est disponible.{" "}
+            <button
+              className="text-button"
+              onClick={() => window.location.reload()}
+            >
+              Recharger
+            </button>
           </div>
         )}
         <div className="period-bar">

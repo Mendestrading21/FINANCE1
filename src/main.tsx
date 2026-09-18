@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
+import { UPDATE_READY_EVENT } from "./swUpdateEvent";
 import "./index.css";
 
 createRoot(document.getElementById("root")!).render(
@@ -19,23 +20,24 @@ if (import.meta.env.PROD && "serviceWorker" in navigator) {
       });
   });
   // sw.js calls skipWaiting()/clients.claim() so a newly deployed shell activates without
-  // waiting for every open tab to close first; this reloads the *already open* tab once so a
-  // new page/feature (e.g. a page added after the user last opened the app) actually shows up,
-  // instead of silently staying on the previous cached shell until the next manual reload.
+  // waiting for every open tab to close first; App.tsx listens for this event and offers a
+  // "Recharger" notice instead of reloading here directly — the vault only ever lives in memory
+  // (vault.ts), so a reload always re-locks it and drops any unsaved edit, and doing that
+  // silently the moment a new version happens to land would be a surprising way to lose either.
   //
   // clients.claim() fires "controllerchange" the very first time a tab gets a controller too
-  // (not only on a genuine later update) — reloading on that first event would just interrupt
-  // a page that already has fresh content, right after it loaded. Only reload once a controller
-  // was already present and then gets replaced by a newer one.
+  // (not only on a genuine later update) — notifying on that first event would flag an update as
+  // "ready" right after a normal fresh load, which already has current content. Only notify once
+  // a controller was already present and then gets replaced by a newer one.
   let hadController = navigator.serviceWorker.controller !== null;
-  let reloadedForUpdate = false;
+  let notifiedForUpdate = false;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
     if (!hadController) {
       hadController = true;
       return;
     }
-    if (reloadedForUpdate) return;
-    reloadedForUpdate = true;
-    window.location.reload();
+    if (notifiedForUpdate) return;
+    notifiedForUpdate = true;
+    window.dispatchEvent(new Event(UPDATE_READY_EVENT));
   });
 }
