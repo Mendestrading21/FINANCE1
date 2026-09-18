@@ -45,7 +45,7 @@ import {
 } from "./vault";
 import { demoData } from "./demo";
 import { parseTransactionCsv, CSV_TEMPLATE } from "./importCsv";
-import { Icon } from "./components/Icon";
+import { Icon, type IconName } from "./components/Icon";
 import { Allocation, FlowChart, WealthChart } from "./components/Charts";
 import Editor, { type EditorSpec } from "./components/Editor";
 import { MonthPicker } from "./components/MonthPicker";
@@ -81,6 +81,33 @@ function download(raw: string, name: string, type = "application/json") {
   a.download = name;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+// Local, deterministic identity for an establishment or a security, wherever the app shows a
+// short monogram instead of a real logo: identite-ui.md rules out fetching a real bank logo at
+// render time (it would reveal which establishments are consulted and depend on a third party)
+// and there is no verified-rights logo/pictogram registry to draw from here — so the fallback
+// is a locally generated monogram, with initials that reflect a multi-word name instead of a
+// naive slice(0, 2) ("Banque Fictive" → "BF", not "BA"), and a stable color from a small
+// palette within the app's own blue-violet accent family (never an arbitrary hue) so entries
+// read as visually distinct in a list, per docs/AUDIT_UI_V2.md.
+function monogramInitials(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  return (
+    words.length > 1 ? words[0][0] + words[1][0] : name.replace(/\s+/g, "").slice(0, 2)
+  ).toUpperCase();
+}
+const MONOGRAM_PALETTE = [
+  { bg: "rgba(138, 169, 255, 0.16)", fg: "#8aa9ff" },
+  { bg: "rgba(170, 150, 255, 0.16)", fg: "#aa96ff" },
+  { bg: "rgba(122, 196, 222, 0.16)", fg: "#7ac4de" },
+  { bg: "rgba(124, 140, 255, 0.16)", fg: "#7c8cff" },
+  { bg: "rgba(200, 150, 230, 0.16)", fg: "#c896e6" },
+  { bg: "rgba(160, 180, 200, 0.16)", fg: "#c0ceef" },
+];
+function monogramColors(name: string): { bg: string; fg: string } {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  return MONOGRAM_PALETTE[hash % MONOGRAM_PALETTE.length];
 }
 function SourceLink({ source }: { source: Source }) {
   return source.url && /^https:\/\/(www\.)?notion\.so\//.test(source.url) ? (
@@ -655,6 +682,18 @@ export default function App() {
     saving: "Épargne / mise de côté",
     other: "À vérifier",
   };
+  // Distinct metaphor per nature (identite-ui.md), reusing existing icons where one already
+  // fits rather than inventing a lookalike: "refresh" for the repeating abonnement itself,
+  // "bank" for a fixed charge, "arrow-down" matching the same icon used for income elsewhere,
+  // "alert" matching its existing "à vérifier" meaning. Only "saving" needed a new icon
+  // ("vault"): reusing "target" (goals/projects) would collide with an unrelated concept.
+  const recurrenceTypeIcons: Record<Recurrence["recurrenceType"], IconName> = {
+    subscription: "refresh",
+    bill: "bank",
+    income: "arrow-down",
+    saving: "vault",
+    other: "alert",
+  };
   // The cohort is keyed by recurrenceId: `occurrenceCohort` only ever produces at most one
   // entry per active recurrence for a given month (see finance.ts), so this lookup is safe.
   const subsCohortItems = occurrenceCohort(data, month);
@@ -749,8 +788,14 @@ export default function App() {
     return (
       <article className="account-card" key={a.id}>
         <div className="account-head">
-          <span className="institution-icon">
-            {a.institution.slice(0, 2).toUpperCase()}
+          <span
+            className="institution-icon"
+            style={{
+              background: monogramColors(a.institution).bg,
+              color: monogramColors(a.institution).fg,
+            }}
+          >
+            {monogramInitials(a.institution)}
           </span>
           <div>
             <span className="institution">{a.institution}</span>
@@ -979,7 +1024,7 @@ export default function App() {
     return (
       <div className="row" key={r.id}>
         <span className="row-icon">
-          <Icon name="refresh" />
+          <Icon name={recurrenceTypeIcons[r.recurrenceType]} />
         </span>
         <div className="row-main">
           <span className="row-title">{r.label}</span>
@@ -1561,7 +1606,7 @@ export default function App() {
                 .map((r) => (
                   <div className="row" key={r.id}>
                     <span className="row-icon">
-                      <Icon name="refresh" />
+                      <Icon name={recurrenceTypeIcons[r.recurrenceType]} />
                     </span>
                     <div className="row-main">
                       <span className="row-title">{r.label}</span>
@@ -1795,8 +1840,14 @@ export default function App() {
                 .filter((p) => filter === "all" || p.assetType === filter)
                 .map((p) => (
                   <div className="row" key={p.id}>
-                    <span className="institution-icon">
-                      {(p.symbol || p.name).slice(0, 2)}
+                    <span
+                      className="institution-icon"
+                      style={{
+                        background: monogramColors(p.symbol || p.name).bg,
+                        color: monogramColors(p.symbol || p.name).fg,
+                      }}
+                    >
+                      {monogramInitials(p.symbol || p.name)}
                     </span>
                     <div className="row-main">
                       <span className="row-title">
