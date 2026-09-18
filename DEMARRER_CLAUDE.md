@@ -1,45 +1,80 @@
-# Démarrer Finance dans Claude ou Codex
+# Démarrer l’amélioration V2 dans Claude Code
 
-Ouvrir le dépôt **Finance1** avec un environnement capable d’exécuter Node et les commandes du projet. Les fichiers d’agents décrivent les missions ; ils ne remplacent pas les outils ni les accès de cet environnement.
-
-Copier cette instruction :
+Ouvrir le dépôt **`Mendestrading21/Finances`** dans Claude Code avec Node et pnpm disponibles, puis copier le texte ci-dessous. Les données financières privées ne doivent pas être ajoutées au dépôt public.
 
 ```text
-Reprends Finance dans ce dépôt Finance1 depuis son état réel.
+Reprends Finance depuis l’état réel du dépôt Mendestrading21/Finances et mène
+la tranche d’amélioration V2 jusqu’à une livraison vérifiée.
 
-Lis AGENTS.md, CLAUDE.md, .claude/skills/finance/SKILL.md,
-docs/STATUS.md s’il existe, puis docs/PLAN.md. Inspecte le code, le diff,
-les scripts et le lockfile avant de décider quoi modifier.
+Commence par lire AGENTS.md, CLAUDE.md, .claude/skills/finance/SKILL.md,
+docs/STATUS.md, docs/AUDIT_UI_V2.md, docs/PLAN_AMELIORATION_V2.md et les
+références du skill correspondant au premier lot. Vérifie le HEAD, le diff,
+les workflows, la CI et le site GitHub Pages. Préserve tout travail plus
+récent que les SHA documentés.
 
-Mon objectif est une application personnelle de budget et patrimoine sur
-iPhone, iPad et Windows, noire/graphite avec accents bleu-violet et verre
-discret, organisée en six pages reliées. Applique les références du skill
-pour les données, calculs, design, sécurité et livraison.
+Mon objectif est de garder l’application noire, sobre, simple et rapide,
+tout en la rendant plus aboutie : cartes moins hautes, listes plus claires,
+icônes homogènes, identité d’établissement discrète, tri financier du plus
+gros au plus petit, sélecteur Janvier–Décembre, page Abonnements et statuts
+mensuels Payé/Reçu/Pas encore payé ou reçu. Le logo Finance doit aussi être
+amélioré et rester original.
 
-Utilise les agents spécialisés pour les tâches indépendantes et la revue
-des changements sensibles. Attribue les fichiers pour éviter les conflits.
-Avance sur les lots autorisés jusqu’à leurs critères réels ; corrige les
-causes des problèmes et conserve un état qui permet la reprise.
+Utilise le coordinateur et les spécialistes du dépôt. Répartis les fichiers
+qui peuvent avancer sans conflit ; fais relire modèle, calculs, migration,
+SVG, coffre et publication par un autre agent. Ne lance pas tous les agents
+pour une tâche minuscule. Conserve dans docs/STATUS.md ce qui est prévu,
+développé, testé, livré ou bloqué.
 
-Vérifie les accès Notion avant de relire Budgets 2026, Bourse /
-Investissement et les pages liées. Les données réelles et secrets restent
-hors Git. Sans accès, termine le code et les vérifications possibles,
-puis indique précisément ce qui empêche le réimport. N’invente aucun solde,
-paiement, date, taux ou synchronisation.
+Traite les lots dans l’ordre des dépendances :
 
-Préserve les inconnus, sépare prévu et payé, exclue les transferts des
-revenus/dépenses et évite le double compte patrimoine/positions.
-Conserve un coffre privé, la saisie manuelle et les sauvegardes fiables.
+1. reproduis et mesure l’état actuel avec la démonstration fictive ;
+2. classe les récurrences sans transformer toutes les charges en abonnements ;
+3. fais évoluer le modèle des occurrences et migre les coffres/exports anciens sans perte ;
+4. remplace le contrôle technique YYYY-MM par des mois français et une année, puis ajoute les actions Marquer payé/Marquer reçu et leur correction ;
+5. ajoute la page Abonnements sur ce modèle partagé ;
+6. centralise le tri multidevise et sépare les valeurs impossibles à comparer ;
+7. transforme comptes et abonnements en listes compactes ;
+8. applique une seule famille d’icônes et un registre local d’établissements ;
+9. propose puis intègre un logo original et toutes ses déclinaisons PWA ;
+10. vérifie, capture, publie et contrôle la CI ainsi que GitHub Pages.
 
-La publication du code dans Finance1 est autorisée : prépare, relis,
-teste, puis publie selon les protections du dépôt, sans force-push ni
-contournement de permissions. Ne crée pas de service payant ou de
-connexion bancaire. Ne confonds pas publication du code et mise en ligne
-de l’application : vérifie une cible d’hébergement avant un déploiement.
+Applique docs/RECHERCHE_UI_V2.md avant toute dépendance. Lucide React est le
+candidat principal pour les icônes, mais vérifie version, licence, bundle et
+accessibilité avant de l’ajouter. N’installe pas plusieurs familles. Conserve
+le CSS actuel ; ne migre pas vers Tailwind, shadcn ou Tremor pour une simple
+refonte. Garde les SVG de graphiques tant qu’un besoin réel ne justifie pas
+Recharts. Aucun logo distant au rendu ; tout SVG doit être local et nettoyé.
 
-À chaque étape majeure, produis une capture réelle de la démonstration
-fictive sur les formats utiles. Termine par les résultats réellement
-testés, la publication vérifiée, les limites et la prochaine action.
+Respecte les règles financières : inconnu n’est pas zéro, ancien n’est pas
+actuel, prévu n’est pas payé, un mois budgétaire n’est pas une date de
+règlement, les transferts n’augmentent pas revenus/dépenses et un compte
+d’investissement n’est pas additionné à ses positions deux fois. Un bouton
+de statut agit sur l’occurrence du mois choisi, conserve l’historique et ne
+crée aucun doublon. Une valeur sans taux va dans À valoriser.
+
+Distingue la cohorte d’échéances et le flux réalisé : une charge due en février
+et payée le 2 mars est soldée pour février, mais son débit est un flux de mars.
+N’utilise jamais les paiements du mois pour calculer directement le reste dû
+des échéances du mois.
+
+Le dépôt est public. Ne publie jamais fichier Notion privé, reçu, sauvegarde,
+export, secret, identifiant de source ou capture personnelle. Les fixtures et
+captures versionnées restent explicitement fictives. Ne crée pas de service
+payant ni de connexion bancaire.
+
+À chaque lot, exécute les tests utiles. Avant livraison finale, passe les
+commandes du package.json pour typecheck, tests, build et Playwright. Vérifie
+390 × 844, 834 × 1112 et 1 440 × 1 000, clavier, focus, états vides, montants
+longs, verrouillage, rechargement et restauration. Fais des captures avant et
+après sur données fictives. Publie les changements relus dans main sans
+force-push, surveille la CI puis contrôle la version réellement déployée.
+
+Avance de façon autonome dans ce périmètre. Si un accès manque, termine les
+lots indépendants et consigne le blocage exact. Ne t’arrête pas à un rapport
+ou une maquette lorsque le code, les tests et la publication sont possibles.
+
+À la fin, donne : pages et parcours modifiés, migrations, résultats de tests,
+captures, commit, CI, URL déployée, limites et prochaine action concrète.
 ```
 
-Le mode local conserve les données dans le navigateur choisi. Pour passer d’un appareil à l’autre, utiliser une sauvegarde chiffrée exportée puis restaurée. La synchronisation automatique doit être développée et configurée avant de pouvoir être annoncée.
+Le skill contient les règles détaillées ; ce prompt lance la tranche. Claude doit vérifier l’état courant au lieu de considérer les SHA ou totaux historiques comme toujours valides.

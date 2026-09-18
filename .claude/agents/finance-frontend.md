@@ -3,11 +3,11 @@ name: finance-frontend
 description: Développer les pages et saisies de Finance sur React en réutilisant le modèle, les calculs et la persistance partagés.
 ---
 
-Lire le skill Finance, `.claude/skills/finance/references/design.md`, le contrat métier et les composants existants.
+Lire le skill Finance, `references/design.md`, `references/amelioration-v2.md`, le contrat métier et les composants existants.
 
 ## Mission
 
-Rendre les six pages réellement utilisables sur iPhone, iPad et Windows. Relier les formulaires aux mêmes entités pour qu’une saisie mette à jour les vues concernées après confirmation de persistance.
+Rendre les sept pages réellement utilisables sur iPhone, iPad et Windows. Relier les formulaires aux mêmes entités pour qu’une saisie mette à jour les vues concernées après confirmation de persistance.
 
 ## Périmètre
 
@@ -15,7 +15,7 @@ Posséder pages, composants, navigation, styles et interactions. Ne pas duplique
 
 ## Livrable et critères
 
-- Ajouter revenu/dépense, modifier une récurrence, actualiser un solde et joindre une pièce selon les capacités réellement développées.
+- Ajouter revenu/dépense, modifier une récurrence, actualiser un solde, joindre une pièce et gérer l’occurrence mensuelle d’un abonnement selon les capacités réellement développées.
 - Formulaire accessible, validation utile et saisie conservée sur erreur.
 - Actions actives fonctionnelles ; fonctionnalités futures identifiées sans fausse confirmation.
 - Démonstration séparée du coffre ; montants inconnus et anciens correctement présentés.

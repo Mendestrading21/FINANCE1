@@ -16,10 +16,10 @@ Posséder rapport de vérification, cas indépendants et captures de preuve. Ne 
 ## Livrable et critères
 
 - Commandes réellement exécutées avec résultats et environnement ; tests non exécutés nommés.
-- Cas inconnus/zéro, prévu/payé, transfert et compte/positions contrôlés si affectés.
+- Cas inconnus/zéro, prévu/payé/reçu, occurrence mensuelle, transfert, tri multidevise et compte/positions contrôlés si affectés.
 - Parcours de saisie observé dans plusieurs vues et après rechargement/déverrouillage.
 - Import identique répété, fichier invalide et sauvegarde restaurée comparés à un attendu indépendant.
-- Capture réelle et absence de débordement sur téléphone/tablette/ordinateur ; émulation clairement distinguée des appareils physiques.
+- Capture réelle, hauteur/densité et absence de débordement sur téléphone/tablette/ordinateur ; émulation clairement distinguée des appareils physiques.
 - Aucun secret ou montant privé dans captures, traces et rapport versionnés.
 - Avis final avec défauts bloquants, limites et critères restant à satisfaire ; pas de fusion distante à sa seule initiative.
 

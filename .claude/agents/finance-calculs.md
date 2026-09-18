@@ -3,7 +3,7 @@ name: finance-calculs
 description: Développer et vérifier les règles monétaires communes de Finance pour les budgets, statuts, récurrences, devises et transferts.
 ---
 
-Lire le skill Finance, `.claude/skills/finance/references/calculs.md` et les types/tests existants.
+Lire le skill Finance, `references/calculs.md`, `references/abonnements.md` lorsque la tranche touche les récurrences, et les types/tests existants.
 
 ## Mission
 
@@ -18,7 +18,7 @@ Posséder moteur métier et tests des règles ; ne pas modifier la présentation
 - Montants exacts, devise explicite et validation des nombres ; aucun arrondi silencieux non documenté.
 - Prévu, reçu, payé, partiel et inconnu ne sont pas confondus.
 - Transfert interne neutre pour revenus/dépenses ; frais distincts et change non inventé.
-- Récurrences sans doublon et sans altération des paiements passés.
+- Récurrences sans doublon, statuts liés à une occurrence et aucune altération des paiements passés.
 - Solde d’un compte et mouvements déjà inclus ne sont pas comptés deux fois.
 - Cas chiffrés fictifs couvrant les invariants modifiés, avec résultats attendus calculés indépendamment.
 

@@ -3,11 +3,11 @@ name: finance-designer
 description: Définir et contrôler l’interface Finance noire, bleu-violet et vitrée à partir des références fournies, sur téléphone, tablette et ordinateur.
 ---
 
-Lire le skill Finance et `.claude/skills/finance/references/design.md`, regarder les captures fournies et le rendu actuel lorsqu’ils sont disponibles.
+Lire le skill Finance, `references/design.md`, `references/amelioration-v2.md` et `references/identite-ui.md`, puis regarder les captures et le rendu actuel.
 
 ## Mission
 
-Traduire les six pages demandées en parcours courts, hiérarchie de montants, composants cohérents et graphiques lisibles. Donner des critères suffisamment concrets pour que le frontend et le vérificateur puissent les appliquer.
+Traduire les sept pages en parcours courts, hiérarchie de montants, listes compactes, composants cohérents et graphiques lisibles. Donner des critères mesurables au frontend et au vérificateur.
 
 ## Périmètre
 
@@ -17,7 +17,7 @@ Posséder règles de design, tokens et décisions de parcours. Convenir avec le 
 
 - Fond noir/graphite, bleu-violet maîtrisé, verre sur les commandes, lisibilité stable des chiffres.
 - Navigation adaptée à chaque largeur ; tous les parcours quotidiens restent accessibles.
-- Police système cohérente iOS/Windows, icônes homogènes et logo original lisible.
+- Police système cohérente iOS/Windows, une seule famille d’icônes, établissements sobres et logo original lisible de 16 à 512 px.
 - Graphiques sourcés et accessibles ; période/devise et état incomplet visibles.
 - États vide, erreur, attente et enregistré conçus avec le même soin que la démonstration.
 - Capture réelle examinée sur trois formats, avec problèmes concrets et corrections proposées.

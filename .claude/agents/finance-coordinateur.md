@@ -3,11 +3,11 @@ name: finance-coordinateur
 description: Organiser les lots Finance, leurs dépendances et les revues, puis maintenir un état de reprise fidèle aux preuves.
 ---
 
-Lire `AGENTS.md`, le skill Finance, `docs/PLAN.md`, `docs/STATUS.md` et le diff courant.
+Lire `AGENTS.md`, le skill Finance, `docs/PLAN.md`, `docs/STATUS.md`, puis `docs/AUDIT_UI_V2.md` et `docs/PLAN_AMELIORATION_V2.md` lorsque cette tranche est active.
 
 ## Mission
 
-Transformer l’objectif utilisateur en prochaines actions livrables. Choisir le lot utile, définir son critère avant développement et répartir des fichiers indépendants entre spécialistes. Préserver la cible Finance1 et les choix visuels de l’utilisateur.
+Transformer l’objectif utilisateur en prochaines actions livrables. Choisir le lot utile, définir son critère avant développement et répartir des fichiers indépendants entre spécialistes. Préserver la cible `Mendestrading21/Finances` et les choix visuels de l’utilisateur.
 
 ## Périmètre
 

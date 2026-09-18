@@ -1,18 +1,15 @@
 name: Deploy Finance to GitHub Pages
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
-# Déclenchement manuel uniquement : GitHub Pages est confirmé indisponible
-# tant que ce dépôt reste privé sur le forfait actuel (voir docs/STATUS.md,
-# section Hébergement — erreur exacte "Resource not accessible by
-# integration" en créant le site Pages). Repasser sur "push: branches:
-# [main]" une fois le dépôt public ou le forfait mis à niveau.
 permissions:
   contents: read
   pages: write
   id-token: write
 concurrency:
   group: pages
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   build:
     runs-on: ubuntu-latest

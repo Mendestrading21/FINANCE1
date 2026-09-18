@@ -22,7 +22,7 @@ Le chiffrement au repos ne protège pas un écran déverrouillé, une extension 
 
 La lecture Notion s’effectue par un accès disponible hors du bundle client. Ne pas inclure d’identifiant confidentiel dans `VITE_*`, une URL, un log, le manifeste ou le service worker. Les variables exposées au client sont publiques par nature.
 
-Avant une synchronisation distante, vérifier le propriétaire, l’authentification, le contrôle d’accès effectif, l’isolation des données, les secrets serveur et les règles de conflit. Aucun fournisseur ou coût nouveau ne découle automatiquement de la permission de publier du code. Publier le dépôt ne publie pas l’application web ; la mise en ligne exige une cible d’hébergement concrète et les vérifications adaptées.
+Avant une synchronisation distante, vérifier le propriétaire, l’authentification, le contrôle d’accès effectif, l’isolation des données, les secrets serveur et les règles de conflit. Aucun fournisseur ou coût nouveau ne découle automatiquement de la permission de publier du code. Dans ce dépôt, une publication sur `main` peut déclencher GitHub Pages : contrôler le build public, l’absence de données privées et l’URL réellement déployée après chaque push.
 
 Une mutation autorisée se prépare et se vérifie sans demander à nouveau une confirmation de routine. Respecter les protections et permissions présentes ; ne pas les désactiver pour fusionner, installer ou déployer. Ne pas activer d’auto-approbation générale.
 

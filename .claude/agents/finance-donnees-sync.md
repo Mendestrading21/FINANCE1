@@ -15,11 +15,11 @@ Posséder schéma, stockage, import/export et adaptations de données. Coordonne
 
 ## Livrable et critères
 
-- Formats versionnés, références valides et rejet explicite des données malformées.
+- Version métier distincte de l’enveloppe cryptographique ; ancien format validé, migration pure/idempotente après déchiffrement, puis nouveau format validé avant écriture.
 - Écriture atomique logique, erreur quota traitée et aucun « enregistré » anticipé.
 - Clés stables de source ; réimport sans doublon et conflit manuel conservé.
 - Export/restauration testés sur un ensemble fictif complet, pièce comprise si supportée.
-- Mauvais mot de passe/fichier corrompu ne détruisent pas le coffre antérieur.
+- Mauvais mot de passe, fichier corrompu ou migration en échec ne détruisent pas le coffre antérieur ; sa restauration exacte est testée.
 - Démonstration et coffre réel séparés ; aucune donnée privée ni secret dans le bundle ou Git.
 - Mode local décrit honnêtement ; synchronisation automatique laissée « non configurée » tant qu’aucun serveur et contrôle d’accès ne sont établis.
 

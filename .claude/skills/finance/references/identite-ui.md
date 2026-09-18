@@ -1,0 +1,62 @@
+# Identité, icônes, établissements et logo
+
+## Famille d’icônes
+
+Utiliser une seule famille de tracés dans l’interface. Le candidat retenu pour élargir le composant actuel est `lucide-react` : imports statiques nommés, taille courante 18–20 px, `strokeWidth` cohérent et couleur héritée. Mesurer le bundle avant/après et conserver les notices de licence. Si le composant SVG interne suffit, l’étendre avec la même grille 24 × 24 au lieu d’ajouter une dépendance.
+
+Éviter d’installer Lucide, Tabler, Fluent et une collection de logos ensemble. Une icône décorative est masquée aux technologies d’assistance ; un bouton composé uniquement d’une icône garde un nom accessible et une infobulle utile.
+
+Associer des métaphores stables :
+
+| Objet          | Icône suggérée                     |
+| -------------- | ---------------------------------- |
+| Compte courant | portefeuille ou carte              |
+| Épargne        | coffre ou tirelire                 |
+| Investissement | courbe ou portefeuille titres      |
+| Dette          | reçu ou balance                    |
+| Abonnement     | répétition ou calendrier récurrent |
+| Payé           | cercle coché                       |
+| À payer        | horloge                            |
+| Reçu           | flèche entrante cochée             |
+| Impôt          | bâtiment officiel neutre           |
+| Projet         | cible                              |
+
+L’icône complète le libellé ; elle ne remplace pas une information financière.
+
+## Établissements
+
+Le nom du compte est primaire. L’établissement devient une information secondaire, accompagnée d’une identité locale :
+
+1. logo officiel fourni par l’établissement et dont l’usage est vérifié ;
+2. pictogramme de marque provenant d’une source recensée, avec source, version et droits conservés ;
+3. monogramme généré localement ou icône de type de compte.
+
+Ne jamais télécharger un logo au rendu : cela révèle les établissements et rend l’interface dépendante d’un tiers. Sanitiser tout SVG, retirer scripts, références externes, événements et CSS distant. Un fichier sous CC0 ne libère pas nécessairement les droits de marque ; ne pas appeler un monogramme « logo officiel ».
+
+Créer un registre local limité aux établissements réellement utiles, avec `id`, `displayName`, `aliases`, `asset`, `source`, `retrievedAt` et `trademarkNote`. Un établissement inconnu garde un fallback propre. Les données privées ne doivent pas être envoyées à un service de recherche de logo.
+
+Le registre versionné ne contient que des métadonnées et actifs génériques. L’association entre un compte personnel et un établissement reste dans le coffre privé, jamais dans le code, une fixture publique ou un journal.
+
+## Cartes
+
+- Ajouter une icône dans l’en-tête des cartes principales et des lignes de comptes/abonnements.
+- Garder le titre court, le montant immédiatement lisible et une seule ligne secondaire par défaut.
+- Déplacer source, historique, méthode de valorisation et aide longue dans un volet de détails.
+- Utiliser l’accent bleu-violet pour la sélection ou une information positive, pas comme bordure lumineuse permanente.
+- Conserver des rayons cohérents : environ 18–20 px pour les grandes cartes, 14–16 px pour les lignes compactes, 10–12 px pour les boutons.
+- Préférer un fond de surface opaque à 85–95 % pour les données ; réserver le verre à la navigation et aux commandes.
+
+## Nouveau logo Finance
+
+Créer un signe original, distinct des logos bancaires et des bibliothèques d’icônes. Direction recommandée : un `F` simple formé par deux plans ou une ligne ascendante discrète, avec un accent bleu-violet limité. Le logo doit fonctionner sans halo et sans texte.
+
+Livrables :
+
+- SVG source nettoyé et lisible en monochrome ;
+- favicon SVG ;
+- icônes 192 et 512 px ;
+- variante maskable avec contenu essentiel dans la zone sûre centrale ;
+- icône Apple touch ;
+- contrôle visuel à 16, 24, 48 et 512 px sur fond noir et clair.
+
+Ne pas agrandir un raster pour fabriquer les déclinaisons. Vérifier le manifeste, le cache hors ligne et l’affichage installé après remplacement.
