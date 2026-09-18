@@ -2,12 +2,29 @@ import {
   useEffect,
   useRef,
   useState,
+  type ChangeEvent,
   type FormEvent,
   type ReactNode,
 } from "react";
-import { type FinanceData, type Source } from "../domain/types";
-import { parseMoney, today } from "../domain/finance";
+import {
+  type Account,
+  type FinanceData,
+  type Recurrence,
+  type Source,
+} from "../domain/types";
+import { parseMoney, today, withRecurrenceAmount } from "../domain/finance";
 import { Icon } from "./Icon";
+/** Amount-related fields for a saved recurrence: routes an existing recurrence's amount
+ * through `withRecurrenceAmount` (dating any real change and archiving the superseded amount)
+ * instead of overwriting it directly, which would silently drop `amountHistory` on every save.
+ * A brand-new recurrence (no `existing`) has no prior amount to preserve. Exported for direct
+ * unit testing of this exact merge, independent of form/DOM plumbing. */
+export function recurrenceAmountFields(
+  existing: Recurrence | undefined,
+  amountMinor: number,
+): Pick<Recurrence, "amountMinor" | "amountEffectiveFrom" | "amountHistory"> {
+  return existing ? withRecurrenceAmount(existing, amountMinor) : { amountMinor };
+}
 export type EditorSpec = {
   type:
     | "transaction"
@@ -73,12 +90,17 @@ export default function Editor({
     typeof initial[name] === "number"
       ? String((initial[name] as number) / 100)
       : "";
+  // The currency select is controlled so choosing an account can prefill its currency
+  // (design: "préremplir seulement les informations déductibles du contexte choisi").
+  const [currencyValue, setCurrencyValue] = useState(val("currency", "CHF"));
   const field = (
     label: string,
     name: string,
     options: {
       type?: string;
       defaultValue?: string;
+      value?: string;
+      onChange?: (e: ChangeEvent<HTMLSelectElement>) => void;
       required?: boolean;
       children?: ReactNode;
       min?: string;
@@ -93,7 +115,10 @@ export default function Editor({
         <select
           aria-label={label}
           name={name}
-          defaultValue={options.defaultValue ?? val(name)}
+          {...(options.value !== undefined
+            ? { value: options.value }
+            : { defaultValue: options.defaultValue ?? val(name) })}
+          onChange={options.onChange}
           required={options.required}
         >
           {options.children}
@@ -120,13 +145,29 @@ export default function Editor({
       {options.hint && <small>{options.hint}</small>}
     </label>
   );
-  const accounts = (label = "Compte", name = "accountId", required = false) =>
-    field(label, name, {
+  const accounts = (
+    label = "Compte",
+    name = "accountId",
+    required = false,
+    syncCurrency = false,
+    onlyKind?: Account["kind"],
+  ) => {
+    const list = onlyKind
+      ? data.accounts.filter((a) => a.kind === onlyKind)
+      : data.accounts;
+    return field(label, name, {
       required,
+      onChange: syncCurrency
+        ? (e) => {
+            const found = data.accounts.find((a) => a.id === e.target.value);
+            // Deducible from the chosen account: no need to re-ask its currency.
+            if (found) setCurrencyValue(found.currency);
+          }
+        : undefined,
       children: (
         <>
           <option value="">Non renseigné</option>
-          {data.accounts.map((a) => (
+          {list.map((a) => (
             <option key={a.id} value={a.id}>
               {a.name} · {a.currency}
             </option>
@@ -134,9 +175,11 @@ export default function Editor({
         </>
       ),
     });
+  };
   const currency = () =>
     field("Devise", "currency", {
-      defaultValue: val("currency", "CHF"),
+      value: currencyValue,
+      onChange: (e) => setCurrencyValue(e.target.value),
       required: true,
       children: (
         <>
@@ -267,11 +310,15 @@ export default function Editor({
           : [...updated.positions, p];
       }
       if (spec.type === "recurrence") {
-        const r = {
+        const existing = data.recurrences.find((r) => r.id === id);
+        const amounts = recurrenceAmountFields(existing, num("amountMinor"));
+        const r: Recurrence = {
           id,
           label: get("label"),
           kind: get("kind") as "income" | "expense",
-          amountMinor: num("amountMinor"),
+          amountMinor: amounts.amountMinor,
+          amountEffectiveFrom: amounts.amountEffectiveFrom,
+          amountHistory: amounts.amountHistory,
           currency: get("currency"),
           accountId: nullable(f.get("accountId")),
           category: get("category"),
@@ -282,7 +329,7 @@ export default function Editor({
           active: get("active") === "true",
           source,
         };
-        updated.recurrences = data.recurrences.some((r) => r.id === id)
+        updated.recurrences = existing
           ? updated.recurrences.map((v) => (v.id === id ? r : v))
           : [...updated.recurrences, r];
       }
@@ -387,6 +434,7 @@ export default function Editor({
               <label className="field">
                 <span>Type</span>
                 <select
+                  aria-label="Type"
                   name="kind"
                   value={kind}
                   onChange={(e) => setKind(e.target.value as typeof kind)}
@@ -401,7 +449,7 @@ export default function Editor({
                 defaultValue: amount("amountMinor"),
               })}
               {currency()}
-              {accounts()}
+              {accounts("Compte", "accountId", kind === "transfer", true)}
               {field("Date de l’opération ou échéance", "date", {
                 type: "date",
                 defaultValue: val("date", item ? "" : today()),
@@ -457,7 +505,7 @@ export default function Editor({
               {field("Déjà réservé", "reservedMinor", {
                 defaultValue: amount("reservedMinor"),
               })}
-              {accounts("Réserve incluse dans ce compte")}
+              {accounts("Réserve incluse dans ce compte", "accountId", false, true)}
               {field("Date de la réserve", "asOf", {
                 type: "date",
                 defaultValue: val("asOf", item ? "" : today()),
@@ -474,7 +522,19 @@ export default function Editor({
             <>
               {field("Nom du titre", "name", { required: true })}
               {field("Symbole", "symbol")}
-              {accounts("Compte d’investissement", "accountId", true)}
+              {accounts(
+                "Compte d’investissement",
+                "accountId",
+                true,
+                false,
+                "investment",
+              )}
+              {!data.accounts.some((a) => a.kind === "investment") && (
+                <p className="footer-note field-full">
+                  Aucun compte de type Investissement pour l’instant. Créez-en
+                  un depuis Mes comptes avant d’ajouter une position.
+                </p>
+              )}
               {field("Type d’actif", "assetType", {
                 defaultValue: val("assetType", "stock"),
                 children: (
@@ -520,7 +580,7 @@ export default function Editor({
                 required: true,
               })}
               {currency()}
-              {accounts()}
+              {accounts("Compte", "accountId", false, true)}
               {field("Catégorie", "category", {
                 defaultValue: val("category", "Abonnements"),
                 required: true,

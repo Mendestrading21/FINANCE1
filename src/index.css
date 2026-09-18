@@ -476,6 +476,17 @@ img.brand-mark {
   font-weight: 450;
   margin-left: 9px;
 }
+/* Variante utilisée hors de la carte patrimoine (ex. Projection nette de
+   « Mon mois ») : la carte y est plus étroite, notamment en une colonne sur
+   iPad/iPhone où .two-columns repasse à 1fr. Sans cette règle, .hero-value
+   restait à 56px et un montant à 5 chiffres pouvait dépasser ou se couper
+   au milieu des chiffres (overflow-wrap: anywhere) dès ~390px de large. */
+.hero-value.compact {
+  font-size: 32px;
+  line-height: 1.2;
+  letter-spacing: -0.045em;
+  margin: 4px 0 6px;
+}
 .hero-foot {
   display: flex;
   align-items: center;
@@ -1435,6 +1446,17 @@ input::file-selector-button {
   justify-content: space-between;
   align-items: center;
   padding-block: 7px;
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+/* Sans ça, le texte et le bouton restent deux items flex sur une seule
+   ligne (nowrap) : à largeur étroite ils ne passent pas à la ligne, ils se
+   compriment chacun, et « Ouvrir mon coffre » se coupait « Ouvrir mon » /
+   « coffre » dans son propre bouton (visible à 390px). flex-wrap laisse le
+   bouton passer entier à la ligne suivante ; nowrap l’empêche de se
+   recouper lui-même s’il reste seul sur sa ligne. */
+.demo-notice .text-button {
+  white-space: nowrap;
 }
 .flow-chart > div + div {
   margin-top: 21px;
@@ -1747,7 +1769,8 @@ input::file-selector-button {
     gap: 10px;
     padding-block: 14px;
   }
-  .row-icon {
+  .row-icon,
+  .row .institution-icon {
     width: 37px;
     height: 37px;
     border-radius: 11px;
@@ -1756,8 +1779,13 @@ input::file-selector-button {
     display: block;
     font-size: 14px;
   }
+  /* Le montant est l’information prioritaire de la ligne (opérations,
+     récurrences, positions, documents) : il ne doit pas devenir plus petit
+     que son libellé. La règle précédente le ramenait à 12px ici, sous le
+     row-title à 14px, ce qui inversait la hiérarchie des montants
+     justement sur le format où elle compte le plus (iPhone). */
   .row-value {
-    font-size: 12px;
+    font-size: 14px;
   }
   .row-detail {
     display: block;
@@ -1957,7 +1985,9 @@ input::file-selector-button {
   }
   .page-footer {
     margin-top: 25px;
-    font-size: 9px;
+    /* 9px rendait la mention « Espace de démonstration · exemples fictifs »
+       difficile à lire sur le format où elle est le plus nécessaire. */
+    font-size: 11px;
   }
 }
 @media (max-width: 360px) {

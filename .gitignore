@@ -11,3 +11,5 @@ private/
 *.db
 playwright-report/
 test-results/
+.scratch/
+.scratch*/

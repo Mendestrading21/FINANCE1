@@ -3,6 +3,8 @@ import type {
   Balance,
   FinanceData,
   FxRate,
+  Recurrence,
+  RecurrenceAmount,
   Transaction,
 } from "./types";
 
@@ -105,6 +107,57 @@ export function latestBalance(account: Account, at = today()): Balance | null {
   );
 }
 
+/** Date from which `recurrence.amountMinor` (its current amount) has applied. */
+function currentAmountFrom(recurrence: Recurrence): string {
+  return recurrence.amountEffectiveFrom ?? recurrence.startDate;
+}
+
+/** Amount in effect for an occurrence dated `at`: the most recent dated change (current or
+ * historical) whose effectiveFrom is not after `at`. A modification never rewrites the amount
+ * of an occurrence dated before its effective date — only `withRecurrenceAmount` may extend
+ * `amountHistory`, and it always dates the superseded amount from when it actually started. */
+export function recurrenceAmountAt(recurrence: Recurrence, at: string): number {
+  const currentFrom = currentAmountFrom(recurrence);
+  const past = (recurrence.amountHistory ?? []).reduce<RecurrenceAmount | null>(
+    (latest, candidate) =>
+      candidate.effectiveFrom <= at &&
+      (!latest || candidate.effectiveFrom > latest.effectiveFrom)
+        ? candidate
+        : latest,
+    null,
+  );
+  if (currentFrom <= at && (!past || currentFrom >= past.effectiveFrom))
+    return recurrence.amountMinor;
+  return past ? past.amountMinor : recurrence.amountMinor;
+}
+
+/** Pure, no-op-safe amount change: the previous amount is preserved in `amountHistory`, dated
+ * from when it actually took effect, so occurrences before `effectiveFrom` keep showing it.
+ * Only occurrences from `effectiveFrom` onward see the new amount. Never touches settled or
+ * otherwise materialized Transactions, which already carry their own frozen amount. */
+export function withRecurrenceAmount(
+  recurrence: Recurrence,
+  amountMinor: number,
+  effectiveFrom = today(),
+): Recurrence {
+  if (!Number.isSafeInteger(amountMinor) || amountMinor < 0)
+    throw new Error("Montant de récurrence invalide.");
+  if (!isDate(effectiveFrom)) throw new Error("Date d’effet invalide.");
+  if (amountMinor === recurrence.amountMinor) return recurrence;
+  return {
+    ...recurrence,
+    amountMinor,
+    amountEffectiveFrom: effectiveFrom,
+    amountHistory: [
+      ...(recurrence.amountHistory ?? []),
+      {
+        amountMinor: recurrence.amountMinor,
+        effectiveFrom: currentAmountFrom(recurrence),
+      },
+    ],
+  };
+}
+
 /** Virtual planned occurrences are replaced by an explicit transaction linked to that occurrence,
  * even if its payment date moves to another month. Only actual transaction dates determine cash month. */
 export function transactionsForMonth(
@@ -143,7 +196,7 @@ export function transactionsForMonth(
       id,
       label: recurrence.label,
       kind: recurrence.kind,
-      amountMinor: recurrence.amountMinor,
+      amountMinor: recurrenceAmountAt(recurrence, date),
       currency: recurrence.currency,
       status: "planned",
       date,

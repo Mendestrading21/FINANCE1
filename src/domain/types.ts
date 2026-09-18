@@ -40,11 +40,26 @@ export type Transaction = {
   occurrenceDate?: string;
   source: Source;
 };
+/** A superseded recurrence amount: it applied from `effectiveFrom` (inclusive) until the next
+ * dated change. Never rewritten once superseded — see `recurrenceAmountAt` in finance.ts. */
+export type RecurrenceAmount = {
+  amountMinor: number;
+  effectiveFrom: string;
+};
 export type Recurrence = {
   id: string;
   label: string;
   kind: "income" | "expense";
+  /** Amount in effect from `amountEffectiveFrom` (or `startDate` if unset) onward. Editing it
+   * must go through `withRecurrenceAmount` so earlier, still-unsettled virtual occurrences keep
+   * the amount that was actually in effect for them instead of being rewritten retroactively. */
   amountMinor: number;
+  /** Date from which `amountMinor` applies; defaults to `startDate` when absent. */
+  amountEffectiveFrom?: string;
+  /** Prior amounts, each dated from when it started applying, strictly before
+   * `amountEffectiveFrom`. Populated automatically by `withRecurrenceAmount`; never read or
+   * written by hand. */
+  amountHistory?: RecurrenceAmount[];
   currency: Currency;
   accountId: string | null;
   category: string;

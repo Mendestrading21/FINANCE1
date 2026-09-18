@@ -14,6 +14,9 @@ const CONFLICT_ERROR =
   "Le coffre a changé dans un autre onglet. Verrouillez puis ouvrez-le à nouveau avant d’enregistrer.";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf-8", { fatal: true });
+// Produced only by `new Date().toISOString()`; kept strict so a tampered or foreign
+// value cannot slip past parsing and influence the older-backup comparison below.
+const SAVED_AT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 type Envelope = {
   format: "Finance";
@@ -21,6 +24,10 @@ type Envelope = {
   kdf: { name: "PBKDF2"; hash: "SHA-256"; iterations: number; salt: string };
   cipher: { name: "AES-GCM"; iv: string; tagLength: 128 };
   ciphertext: string;
+  // Optional so an envelope written before this field existed still parses unchanged
+  // (same authenticated bytes, see additionalData). Absent on either side means
+  // "unknown age": importVault never blocks a restore it cannot date.
+  savedAt?: string;
 };
 type KeyState = { salt: string; iterations: number; expectedRaw: string };
 const keyStates = new WeakMap<CryptoKey, KeyState>();
@@ -64,6 +71,24 @@ function exactKeys(value: Record<string, unknown>, keys: string[]): boolean {
   return (
     Object.keys(value).length === keys.length &&
     keys.every((key) => Object.hasOwn(value, key))
+  );
+}
+
+/** The envelope's required keys, plus the optional `savedAt` — never any other extra key. */
+function envelopeKeysValid(value: Record<string, unknown>): boolean {
+  const required = ["format", "version", "kdf", "cipher", "ciphertext"];
+  const extra = Object.hasOwn(value, "savedAt") ? 1 : 0;
+  return (
+    Object.keys(value).length === required.length + extra &&
+    required.every((key) => Object.hasOwn(value, key))
+  );
+}
+
+function isSavedAt(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    SAVED_AT_PATTERN.test(value) &&
+    Number.isFinite(Date.parse(value))
   );
 }
 
@@ -120,7 +145,7 @@ function parseEnvelope(raw: string): Envelope {
   }
   if (
     !record(value) ||
-    !exactKeys(value, ["format", "version", "kdf", "cipher", "ciphertext"]) ||
+    !envelopeKeysValid(value) ||
     value.format !== "Finance" ||
     value.version !== 1 ||
     !record(value.kdf) ||
@@ -134,7 +159,8 @@ function parseEnvelope(raw: string): Envelope {
     value.kdf.iterations < ITERATIONS ||
     value.kdf.iterations > MAX_ITERATIONS ||
     value.cipher.name !== "AES-GCM" ||
-    value.cipher.tagLength !== 128
+    value.cipher.tagLength !== 128 ||
+    (value.savedAt !== undefined && !isSavedAt(value.savedAt))
   ) {
     throw new Error(INVALID_ERROR);
   }
@@ -159,6 +185,9 @@ function additionalData(
       envelope.cipher.name,
       envelope.cipher.iv,
       envelope.cipher.tagLength,
+      // Included only when present so an envelope sealed before this field existed
+      // still authenticates with the exact same bytes it always did.
+      ...(envelope.savedAt === undefined ? [] : [envelope.savedAt]),
     ]),
   );
 }
@@ -228,6 +257,9 @@ async function seal(
       salt: state.salt,
     },
     cipher: { name: "AES-GCM", iv: toBase64(iv), tagLength: 128 },
+    // Authenticated, unencrypted save time. Not secret; lets a later restore warn
+    // before silently replacing data saved more recently than the backup being applied.
+    savedAt: new Date().toISOString(),
   };
   try {
     const ciphertext = await crypto.subtle.encrypt(
@@ -392,13 +424,41 @@ export function exportVault(): string {
   return raw;
 }
 
+/** Restores an encrypted backup, replacing whatever vault is on this device.
+ * Fully decrypted and validated before any write, so a wrong passphrase or a corrupted,
+ * truncated or foreign file never touches the existing vault (see tests).
+ * When a vault already exists here and both it and `raw` carry a `savedAt`, a backup
+ * strictly older than the current vault is refused rather than silently discarded —
+ * pass `allowOlder: true` (`allowOlder` as third argument) once the caller has
+ * explicitly confirmed that replacing more recent data is intended. */
 export async function importVault(
   raw: string,
   passphrase: string,
+  allowOlder = false,
 ): Promise<{ key: CryptoKey; data: FinanceData }> {
   const previous = readRaw();
   const envelope = parseEnvelope(raw);
   const result = await open(envelope, passphrase);
+  // A wrong passphrase always fails above, before this ever runs: dating a backup an
+  // attacker cannot open leaks nothing. Only compare once both sides are authenticated.
+  if (!allowOlder && previous !== null && envelope.savedAt !== undefined) {
+    let currentSavedAt: string | undefined;
+    try {
+      // Envelope metadata only: never requires the current passphrase to date it.
+      currentSavedAt = parseEnvelope(previous).savedAt;
+    } catch {
+      // The vault on this device cannot be read at all: dating it is impossible, and
+      // blocking the one operation that could recover it would be actively harmful.
+      currentSavedAt = undefined;
+    }
+    // Both timestamps come from `new Date().toISOString()`, so lexicographic order
+    // matches chronological order; missing on either side means "unknown", never "older".
+    if (currentSavedAt !== undefined && envelope.savedAt < currentSavedAt) {
+      throw new Error(
+        `Cette sauvegarde est plus ancienne (enregistrée le ${envelope.savedAt}) que le coffre déjà présent sur cet appareil (enregistré le ${currentSavedAt}). Elle n’a pas été restaurée pour ne pas remplacer des données plus récentes ; confirmez explicitement pour la restaurer quand même.`,
+      );
+    }
+  }
   // Validate and decrypt completely before any write. An invalid import leaves the old vault intact.
   const normalized = JSON.stringify(envelope);
   await commit(normalized, previous);

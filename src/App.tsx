@@ -111,6 +111,15 @@ function Card({
     </section>
   );
 }
+// vault.ts (importVault) refuses a backup strictly older than the vault already present
+// on this device by throwing a plain Error whose message starts with this exact wording.
+// It exposes no dedicated error type, so the UI matches on that stable prefix to offer an
+// explicit "restore anyway" confirmation instead of a dead-end error. Keep in sync with the
+// message importVault throws in src/vault.ts.
+const OLDER_BACKUP_ERROR_PREFIX = "Cette sauvegarde est plus ancienne";
+function isOlderBackupError(message: string): boolean {
+  return message.startsWith(OLDER_BACKUP_ERROR_PREFIX);
+}
 function Auth({
   onOpen,
   onDemo,
@@ -121,14 +130,29 @@ function Auth({
   const [exists, setExists] = useState(vaultExists),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
-    [backup, setBackup] = useState<string | null>(null);
+    [backup, setBackup] = useState<string | null>(null),
+    // Set only when importVault refused to restore because the backup is older than the
+    // current vault. Holds what's needed to retry with allowOlder once the person
+    // explicitly confirms; cleared on cancel, on success, or if another error occurs.
+    [olderBackup, setOlderBackup] = useState<{
+      raw: string;
+      password: string;
+      message: string;
+    } | null>(null),
+    cancelOlderBackupRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    // Default focus lands on the safer action so a stray Enter/Space never replaces
+    // newer data by accident.
+    if (olderBackup) cancelOlderBackupRef.current?.focus();
+  }, [olderBackup]);
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError("");
     setBusy(true);
+    let password = "";
     try {
-      const f = new FormData(e.currentTarget),
-        password = String(f.get("password") || "");
+      const f = new FormData(e.currentTarget);
+      password = String(f.get("password") || "");
       if (backup) {
         if (exists && !f.get("replace"))
           throw new Error(
@@ -147,12 +171,42 @@ function Auth({
         onOpen(data, key);
       }
     } catch (e) {
+      if (backup && e instanceof Error && isOlderBackupError(e.message)) {
+        // Nothing was written (importVault fails closed before touching the vault):
+        // ask for an explicit, conscious confirmation instead of a dead-end error.
+        setOlderBackup({ raw: backup, password, message: e.message });
+      } else {
+        setError(
+          e instanceof Error ? e.message : "Impossible d’ouvrir le coffre.",
+        );
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function confirmOlderBackup() {
+    if (!olderBackup) return;
+    setBusy(true);
+    setError("");
+    try {
+      const r = await importVault(olderBackup.raw, olderBackup.password, true);
+      setOlderBackup(null);
+      onOpen(r.data, r.key);
+    } catch (e) {
+      // Any other failure here (e.g. the vault changed underneath us) falls back to the
+      // normal error path — no false success, and the person lands back on the form.
+      setOlderBackup(null);
       setError(
         e instanceof Error ? e.message : "Impossible d’ouvrir le coffre.",
       );
     } finally {
       setBusy(false);
     }
+  }
+  function cancelOlderBackup() {
+    // Nothing was ever written for this refusal, so canceling is a pure UI reset.
+    setOlderBackup(null);
+    setError("");
   }
   async function restore(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -161,6 +215,7 @@ function Auth({
       setError("Sauvegarde trop volumineuse (25 Mo maximum).");
       return;
     }
+    setOlderBackup(null);
     setBackup(await file.text());
     setError("");
   }
@@ -193,91 +248,143 @@ function Auth({
           Finance
         </div>
         <p className="eyebrow">BIENVENUE CHEZ VOUS</p>
-        <h2>
-          {backup
-            ? "Restaurer votre sauvegarde"
-            : exists
-              ? "Ouvrir mon espace"
-              : "Créer mon espace privé"}
+        <h2 id="auth-heading">
+          {olderBackup
+            ? "Confirmer la restauration"
+            : backup
+              ? "Restaurer votre sauvegarde"
+              : exists
+                ? "Ouvrir mon espace"
+                : "Créer mon espace privé"}
         </h2>
         <p className="subtitle">
-          {exists
-            ? "Votre phrase secrète déverrouille les données de cet appareil."
-            : "Choisissez une phrase secrète de 12 caractères minimum. Elle chiffre vos données sur cet appareil."}
+          {olderBackup
+            ? "Cette sauvegarde est plus ancienne que les données déjà présentes sur cet appareil."
+            : exists
+              ? "Votre phrase secrète déverrouille les données de cet appareil."
+              : "Choisissez une phrase secrète de 12 caractères minimum. Elle chiffre vos données sur cet appareil."}
         </p>
-        <form onSubmit={submit}>
-          <label className="field">
-            <span>Phrase secrète</span>
-            <input
-              type="password"
-              name="password"
-              autoComplete={exists ? "current-password" : "new-password"}
-              minLength={exists || backup ? 1 : 12}
-              required
-            />
-          </label>
-          {!exists && !backup && (
-            <label className="field">
-              <span>Confirmer la phrase secrète</span>
-              <input
-                type="password"
-                name="confirmation"
-                autoComplete="new-password"
-                minLength={12}
-                required
-              />
-            </label>
-          )}
-          {backup && exists && (
-            <label className="notice">
-              <input type="checkbox" name="replace" /> Remplacer le coffre de
-              cet appareil par cette sauvegarde.
-            </label>
-          )}
-          {error && (
-            <p className="error" role="alert">
-              {error}
-            </p>
-          )}
-          <button className="button primary full-width" disabled={busy}>
-            {busy
-              ? "Ouverture…"
-              : backup
-                ? "Restaurer"
-                : exists
-                  ? "Déverrouiller"
-                  : "Créer mon coffre"}
-            <Icon name="chevron-right" />
-          </button>
-        </form>
-        <p className="footer-note">
-          La phrase secrète ne peut pas être récupérée. Gardez-la et exportez
-          régulièrement une sauvegarde chiffrée.
-        </p>
-        <div className="auth-links">
-          <label className="button secondary">
-            Restaurer une sauvegarde
-            <input
-              className="sr-only"
-              type="file"
-              accept=".finance-vault,.json"
-              onChange={restore}
-            />
-          </label>
-          <button className="button secondary" disabled={busy} onClick={onDemo}>
-            Voir la démonstration
-          </button>
-        </div>
-        {backup && (
-          <button
-            className="text-button"
-            onClick={() => {
-              setBackup(null);
-              setExists(vaultExists());
-            }}
+        {olderBackup ? (
+          <div
+            className="older-backup-confirm"
+            role="alertdialog"
+            aria-labelledby="auth-heading"
+            aria-describedby="older-backup-message"
           >
-            Annuler la restauration
-          </button>
+            <p className="notice warning" id="older-backup-message" role="alert">
+              {olderBackup.message}
+            </p>
+            <p className="footer-note">
+              Vous êtes sur le point de remplacer les données actuelles de cet
+              appareil, plus récentes, par cette sauvegarde plus ancienne.
+              Cette action remplacera le coffre de cet appareil.
+            </p>
+            {error && (
+              <p className="error" role="alert">
+                {error}
+              </p>
+            )}
+            <button
+              type="button"
+              className="button primary full-width"
+              disabled={busy}
+              onClick={confirmOlderBackup}
+            >
+              {busy ? "Restauration…" : "Restaurer quand même"}
+              <Icon name="chevron-right" />
+            </button>
+            <button
+              type="button"
+              ref={cancelOlderBackupRef}
+              className="button secondary full-width"
+              disabled={busy}
+              onClick={cancelOlderBackup}
+            >
+              Annuler
+            </button>
+          </div>
+        ) : (
+          <>
+            <form onSubmit={submit}>
+              <label className="field">
+                <span>Phrase secrète</span>
+                <input
+                  type="password"
+                  name="password"
+                  autoComplete={exists ? "current-password" : "new-password"}
+                  minLength={exists || backup ? 1 : 12}
+                  required
+                />
+              </label>
+              {!exists && !backup && (
+                <label className="field">
+                  <span>Confirmer la phrase secrète</span>
+                  <input
+                    type="password"
+                    name="confirmation"
+                    autoComplete="new-password"
+                    minLength={12}
+                    required
+                  />
+                </label>
+              )}
+              {backup && exists && (
+                <label className="notice">
+                  <input type="checkbox" name="replace" /> Remplacer le
+                  coffre de cet appareil par cette sauvegarde.
+                </label>
+              )}
+              {error && (
+                <p className="error" role="alert">
+                  {error}
+                </p>
+              )}
+              <button className="button primary full-width" disabled={busy}>
+                {busy
+                  ? "Ouverture…"
+                  : backup
+                    ? "Restaurer"
+                    : exists
+                      ? "Déverrouiller"
+                      : "Créer mon coffre"}
+                <Icon name="chevron-right" />
+              </button>
+            </form>
+            <p className="footer-note">
+              La phrase secrète ne peut pas être récupérée. Gardez-la et
+              exportez régulièrement une sauvegarde chiffrée.
+            </p>
+            <div className="auth-links">
+              <label className="button secondary">
+                Restaurer une sauvegarde
+                <input
+                  className="sr-only"
+                  type="file"
+                  accept=".finance-vault,.json"
+                  onChange={restore}
+                />
+              </label>
+              <button
+                className="button secondary"
+                disabled={busy}
+                onClick={onDemo}
+              >
+                Voir la démonstration
+              </button>
+            </div>
+            {backup && (
+              <button
+                className="text-button"
+                onClick={() => {
+                  setBackup(null);
+                  setOlderBackup(null);
+                  setExists(vaultExists());
+                }}
+              >
+                Annuler la restauration
+              </button>
+            )}
+          </>
         )}
       </section>
     </main>
@@ -419,7 +526,10 @@ export default function App() {
       setBusy(false);
     }
   }
-  async function attach(e: ChangeEvent<HTMLInputElement>) {
+  async function attach(
+    e: ChangeEvent<HTMLInputElement>,
+    transactionId: string | null = receiptTxn || null,
+  ) {
     try {
       const file = e.target.files?.[0];
       if (!file || !data) return;
@@ -447,7 +557,7 @@ export default function App() {
             name: file.name,
             mimeType: file.type,
             dataUrl: encoded,
-            transactionId: receiptTxn || null,
+            transactionId,
             addedAt: new Date().toISOString(),
             source: { system: "manual" },
           },
@@ -624,6 +734,8 @@ export default function App() {
               : t.status === "planned"
                 ? "Prévu"
                 : "À vérifier"}
+            {data?.documents.some((d) => d.transactionId === t.id) &&
+              " · Justificatif joint"}
           </span>
         </div>
         <span className={`row-value ${t.kind === "income" ? "positive" : ""}`}>
@@ -641,15 +753,37 @@ export default function App() {
           </button>
         ) : null}
         {data?.transactions.some((i) => i.id === t.id) && (
-          <button
-            className="icon-button"
-            aria-label={`Modifier ${t.label}`}
-            onClick={() =>
-              edit({ type: "transaction", id: t.id, kind: t.kind })
+          <>
+            {
+              // Kept exclusive with the "confirmer" action above so a row never carries
+              // three icon buttons at once (crowds the label on an iPhone width). A
+              // receipt is also most often at hand once the operation is settled; a
+              // planned operation can still be reached from Documents et réglages.
+              t.status !== "planned" && (
+                <label
+                  className="icon-button"
+                  aria-label={`Joindre un document à ${t.label}`}
+                >
+                  <Icon name="document" size={17} />
+                  <input
+                    className="sr-only"
+                    type="file"
+                    accept="application/pdf,image/jpeg,image/png,image/webp"
+                    onChange={(e) => attach(e, t.id)}
+                  />
+                </label>
+              )
             }
-          >
-            <Icon name="edit" size={17} />
-          </button>
+            <button
+              className="icon-button"
+              aria-label={`Modifier ${t.label}`}
+              onClick={() =>
+                edit({ type: "transaction", id: t.id, kind: t.kind })
+              }
+            >
+              <Icon name="edit" size={17} />
+            </button>
+          </>
         )}
       </div>
     );
