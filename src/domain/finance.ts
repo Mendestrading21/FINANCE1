@@ -232,8 +232,15 @@ export type OccurrenceCohortItem = {
    * happened in — null while still due. Only status "settled" closes an occurrence; one
    * left "planned" or "unknown" is not a règlement. `date` mirrors the transaction's own
    * (nullable) date: a settlement recorded without a date cannot be dated "payé le …", but
-   * it is still a settlement — see monthSummary's identical treatment of this case. */
-  settled: { transactionId: string; date: string | null; amountMinor: number } | null;
+   * it is still a settlement — see monthSummary's identical treatment of this case.
+   * `currency` is the settled transaction's own currency, not assumed to match the
+   * recurrence's: the editor lets a settlement's currency be corrected before saving. */
+  settled: {
+    transactionId: string;
+    date: string | null;
+    amountMinor: number;
+    currency: string;
+  } | null;
 };
 /** Every occurrence due in `month`, "cohorte d'échéances"-style: unlike `transactionsForMonth`,
  * always includes an occurrence whose due date falls in `month` even if it was actually
@@ -272,6 +279,7 @@ export function occurrenceCohort(
             transactionId: settledTransaction.id,
             date: settledTransaction.date,
             amountMinor: settledTransaction.amountMinor,
+            currency: settledTransaction.currency,
           }
         : null,
     });
@@ -281,6 +289,101 @@ export function occurrenceCohort(
       a.occurrenceDate.localeCompare(b.occurrenceDate) ||
       a.recurrenceId.localeCompare(b.recurrenceId),
   );
+}
+
+export type CohortSummary = {
+  dueMinor: number | null;
+  settledMinor: number | null;
+  remainingMinor: number | null;
+  activeCount: number;
+  partial: boolean;
+  excluded: number;
+};
+/** amelioration-v2.md's résumé compact for expense-kind recurring occurrences: "Dû en <mois>",
+ * "Réglé pour <mois>" and "Reste dû", each converted to `currency`. Income recurrences don't
+ * fit "due" framing and are excluded from this aggregate — their own settlement still shows
+ * per-occurrence (`occurrenceCohort`) and in the realized flow (`monthSummary`). `activeCount`
+ * counts every active recurrence regardless of kind. A month with no due occurrence at all is
+ * a confident, computed 0 — that absence is a fact about the recurrence rules, not a missing
+ * observation — but a missing FX rate on any due or settled amount makes the whole trio
+ * null/partial instead of silently treating that one item as zero, mirroring wealthSummary. */
+export function cohortSummary(
+  data: FinanceData,
+  month: string,
+  currency: string,
+): CohortSummary {
+  const items = occurrenceCohort(data, month).filter((i) => i.kind === "expense");
+  const dueParts: number[] = [];
+  const settledParts: number[] = [];
+  let excluded = 0;
+  for (const item of items) {
+    const dueValue = convertMinor(
+      item.dueAmountMinor,
+      item.currency,
+      currency,
+      data.fxRates,
+      item.occurrenceDate,
+    );
+    if (dueValue === null) {
+      excluded++;
+      continue;
+    }
+    dueParts.push(dueValue);
+    if (item.settled) {
+      const settledValue = convertMinor(
+        item.settled.amountMinor,
+        item.settled.currency,
+        currency,
+        data.fxRates,
+        item.settled.date ?? item.occurrenceDate,
+      );
+      if (settledValue === null) {
+        excluded++;
+        continue;
+      }
+      settledParts.push(settledValue);
+    }
+  }
+  const partial = excluded > 0;
+  const dueMinor = partial ? null : sum(dueParts);
+  const settledMinor = partial ? null : sum(settledParts);
+  return {
+    dueMinor,
+    settledMinor,
+    remainingMinor:
+      dueMinor !== null && settledMinor !== null
+        ? sum([dueMinor, -settledMinor])
+        : null,
+    activeCount: data.recurrences.filter((r) => r.active).length,
+    partial,
+    excluded,
+  };
+}
+
+/** The next date `recurrence` is due on or after `from` (inclusive), or null once it has none
+ * left (inactive, or every remaining occurrence is past `endDate`). For a page listing
+ * upcoming subscriptions/charges, not the cohort of a specific already-chosen month. Scans
+ * forward month by month, bounded the same way `availableSummary` bounds its own scan (1200
+ * months / 100 years comfortably covers `intervalMonths`'s 1–120 range). */
+export function nextOccurrenceDate(
+  recurrence: Recurrence,
+  from = today(),
+): string | null {
+  if (!isDate(from)) throw new Error("Date de référence invalide.");
+  if (!recurrence.active) return null;
+  if (recurrence.endDate && from > recurrence.endDate) return null;
+  const [fromYear, fromMonth] = monthParts(
+    (from > recurrence.startDate ? from : recurrence.startDate).slice(0, 7),
+  );
+  for (let offset = 0; offset < 1200; offset++) {
+    const absoluteMonth = fromYear * 12 + fromMonth - 1 + offset;
+    const year = Math.floor(absoluteMonth / 12),
+      monthNumber = (absoluteMonth % 12) + 1;
+    const month = `${String(year).padStart(4, "0")}-${String(monthNumber).padStart(2, "0")}`;
+    const due = occurrenceDueDate(recurrence, month);
+    if (due !== null && due >= from) return due;
+  }
+  return null;
 }
 
 function rateFraction(rate: string): [bigint, bigint] {
