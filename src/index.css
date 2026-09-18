@@ -381,39 +381,73 @@ img.brand-mark {
   flex-wrap: wrap;
   margin: 0 0 22px;
 }
-.month-picker,
 .currency-picker {
   display: inline-flex;
   align-items: center;
   gap: 11px;
 }
-.month-picker {
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 2px;
-  background: #12141b;
+.month-picker-v2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* Bounds this against .period-bar's own width instead of sizing to its content (all
+   * 12 chips unscrolled): without it, nothing forces .month-row below to shrink, and it
+   * grows the whole page wider than the viewport instead of scrolling internally. */
+  min-width: 0;
+  max-width: 100%;
 }
-.month-picker .icon-button {
-  width: 40px;
-  min-width: 44px;
-  height: 44px;
-  background: transparent;
-  border: 0;
+.year-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
 }
-.month-picker span,
-.month-picker strong {
-  min-width: 104px;
+.year-control strong {
+  min-width: 52px;
   text-align: center;
   font-size: 14px;
   font-weight: 550;
+  font-variant-numeric: tabular-nums;
 }
-.month-picker input {
-  border: 0;
-  background: transparent;
-  padding: 0 5px;
+.year-control .icon-button {
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+}
+.month-picker-v2 > .button {
+  flex-shrink: 0;
+}
+.month-row {
+  display: flex;
+  gap: 4px;
+  background: #11141e;
+  border: 1px solid var(--line);
+  padding: 4px;
+  border-radius: 12px;
+  overflow-x: auto;
+  /* The actual fix: a flex item's automatic min-width is its content size unless this is
+   * also set explicitly — without it, overflow-x:auto alone does not reliably force this
+   * row to respect the space .period-bar has, across nested flex containers. */
+  min-width: 0;
+  flex: 1 1 auto;
+  /* Twelve chips never fit at 390px: scroll, never wrap onto a second line, which
+   * would defeat the point of a compact single-row month picker. */
+  flex-wrap: nowrap;
+}
+.month-chip {
+  flex-shrink: 0;
   min-height: 44px;
-  width: 156px;
-  font-size: 14px;
+  min-width: 44px;
+  padding: 9px 13px;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+}
+.month-chip.active {
+  color: #e5eaff;
+  background: #262d41;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045);
 }
 .currency-picker {
   font-size: 12px;
@@ -1687,15 +1721,12 @@ input::file-selector-button {
     gap: 10px;
     margin-bottom: 17px;
   }
-  .month-picker {
-    gap: 1px;
+  .month-row {
+    padding: 3px;
   }
-  .month-picker span,
-  .month-picker strong {
-    min-width: 96px;
-  }
-  .month-picker input {
-    width: 145px;
+  .month-chip {
+    padding: 8px 11px;
+    font-size: 12px;
   }
   .currency-picker {
     gap: 7px;

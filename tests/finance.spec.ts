@@ -610,3 +610,70 @@ test("restore an older backup: refused with an explicit confirmation, cancel cha
 
   expect(errors).toEqual([]);
 });
+
+test("month picker: French Janvier–Décembre row, year navigation, Ce mois-ci shortcut", async ({
+  page,
+}) => {
+  const monthPassphrase = "Exemple-test-Finance-mois-2026";
+  const monthNames = [
+    "Janvier",
+    "Février",
+    "Mars",
+    "Avril",
+    "Mai",
+    "Juin",
+    "Juillet",
+    "Août",
+    "Septembre",
+    "Octobre",
+    "Novembre",
+    "Décembre",
+  ];
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonthName = monthNames[now.getMonth()];
+  // 6 months away is always a different month regardless of when the suite runs.
+  const otherMonthName = monthNames[(now.getMonth() + 6) % 12];
+
+  await page.goto("/");
+  await page.getByLabel("Phrase secrète", { exact: true }).fill(monthPassphrase);
+  await page.getByLabel("Confirmer la phrase secrète").fill(monthPassphrase);
+  await page.getByRole("button", { name: "Créer mon coffre" }).click();
+
+  const currentChip = page.getByRole("button", { name: currentMonthName, exact: true });
+  await expect(currentChip).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText(String(currentYear), { exact: true })).toBeVisible();
+  // The current month is selected by default: no "back to this month" shortcut needed yet.
+  await expect(page.getByRole("button", { name: "Ce mois-ci" })).toHaveCount(0);
+
+  // Distinct, disambiguated short labels: a naive slice(0, 3) would show "Jui" for both.
+  await expect(
+    page.getByRole("button", { name: "Juin", exact: true }),
+  ).toHaveText("Jun");
+  await expect(
+    page.getByRole("button", { name: "Juillet", exact: true }),
+  ).toHaveText("Jul");
+
+  // Selecting another month updates the pressed chip and reveals the "back to today" shortcut.
+  await page.getByRole("button", { name: otherMonthName, exact: true }).click();
+  await expect(currentChip).toHaveAttribute("aria-pressed", "false");
+  await expect(
+    page.getByRole("button", { name: otherMonthName, exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  const backToToday = page.getByRole("button", { name: "Ce mois-ci" });
+  await expect(backToToday).toBeVisible();
+
+  // Year navigation keeps the same month number and stays reachable from any month.
+  await page.getByRole("button", { name: "Année suivante" }).click();
+  await expect(page.getByText(String(currentYear + 1), { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: otherMonthName, exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Année précédente" }).click();
+  await expect(page.getByText(String(currentYear), { exact: true })).toBeVisible();
+
+  // The shortcut returns exactly to today's month and then disappears.
+  await backToToday.click();
+  await expect(currentChip).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Ce mois-ci" })).toHaveCount(0);
+});

@@ -39,6 +39,7 @@ import { parseTransactionCsv, CSV_TEMPLATE } from "./importCsv";
 import { Icon } from "./components/Icon";
 import { Allocation, FlowChart, WealthChart } from "./components/Charts";
 import Editor, { type EditorSpec } from "./components/Editor";
+import { MonthPicker } from "./components/MonthPicker";
 const pages = [
   { id: "overview", name: "Vue d’ensemble", short: "Accueil", icon: "home" },
   { id: "month", name: "Mon mois", short: "Mon mois", icon: "calendar" },
@@ -1034,16 +1035,11 @@ export default function App() {
           </div>
         )}
         <div className="period-bar">
-          <label className="month-picker">
-            <Icon name="calendar" size={18} />
-            <span className="sr-only">Mois</span>
-            <input
-              type="month"
-              aria-label="Mois"
-              value={month}
-              onChange={(e) => e.target.value && setMonth(e.target.value)}
-            />
-          </label>
+          <MonthPicker
+            month={month}
+            onChange={setMonth}
+            currentMonth={today().slice(0, 7)}
+          />
           <label className="currency-picker">
             <span className="sr-only">Devise d’affichage</span>
             <select
@@ -1063,7 +1059,9 @@ export default function App() {
               ))}
             </select>
           </label>
-          <span className="meta">{monthLabel(month)}</span>
+          <span className="meta" aria-live="polite">
+            {monthLabel(month)}
+          </span>
         </div>
         {page === "overview" && (
           <>
